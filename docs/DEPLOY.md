@@ -21,20 +21,39 @@
 5. Add a **Domain** in Dokploy mapping `monitor.yourdomain.com` → `web:3000` (with
    HTTPS).
 
-## Option B — Two apps off one image
+## Option B — Two apps off one image (managed Postgres/Redis)
 
 If you'd rather not bundle Postgres/Redis in compose (e.g. you already run managed
-ones in Dokploy):
+ones in Dokploy). The same image runs either role via the `PROCESS_ROLE` env var —
+no custom start commands needed.
 
 1. Create a Dokploy **Postgres** service and a **Redis** service. Note their
-   internal hosts.
-2. Create a Dokploy **Application** from this repo (Dockerfile build). Set its
-   `start` command to `npm run start`. Env: `DATABASE_URL`, `REDIS_URL`, all
-   `SRC_*`, keys, auth, cron. Map the domain to it.
-3. Create a second **Application** from the same repo, start command
-   `npm run worker`, same env.
-4. Run the initial schema sync once (in the web app's terminal):
-   `npx prisma db push`.
+   internal hosts and build a `DATABASE_URL` / `REDIS_URL`.
+2. Create a Dokploy **Application** from this repo (Dockerfile build).
+   Env: `PROCESS_ROLE=web`, `DATABASE_URL`, `REDIS_URL`, all `SRC_*`, keys, auth,
+   cron. Map the domain to it. (`web` role auto-runs `prisma db push` on boot.)
+3. Create a second **Application** from the same repo with `PROCESS_ROLE=worker`
+   and the same env. No domain needed.
+
+## Option C — Single Application (simplest, one container)
+
+For the least moving parts: one Dokploy **Application** that runs web **and** worker
+in the same container, against a managed Postgres + Redis.
+
+1. Create Dokploy **Postgres** + **Redis** services.
+2. Create one **Application** from this repo (Dockerfile). Env: `PROCESS_ROLE=all`,
+   `DATABASE_URL`, `REDIS_URL`, `SRC_*`, keys, auth, cron. Map the domain.
+3. That's it — the entrypoint migrates the schema, starts the worker in the
+   background, and serves the dashboard. (Trade-off: if the worker crashes it won't
+   restart independently; Compose/Option B keep them separate.)
+
+## The image's PROCESS_ROLE
+
+| Value | What the container does |
+|-------|-------------------------|
+| `web` (default) | `prisma db push`, then the Next.js server on port 3000 |
+| `worker` | the BullMQ worker (scheduler + collect/uptime/audit jobs) |
+| `all` | migrate + worker (background) + web (foreground), one container |
 
 ## First run
 
