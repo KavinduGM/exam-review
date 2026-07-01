@@ -1,0 +1,185 @@
+// Master database for the Web Site Auditor (Postgres).
+// This is OUR registry — completely separate from the client's MySQL sites,
+// which are only ever read (read-only) for cross-validation.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum LinkType {
+  LANDING
+  PRACTICE
+  TIMED
+  CONTACT
+}
+
+enum PracticeSource {
+  NEW // questions.*  -> exam_db
+  OLD // answers.*    -> answers_db
+  NONE
+}
+
+enum RunType {
+  COLLECT
+  UPTIME
+  AUDIT
+}
+
+enum IncidentStatus {
+  OPEN
+  RESOLVED
+}
+
+/// A managed website (e.g. oapractice). New sites are added here; the collector
+/// discovers their exams automatically from the sitemap.
+model Site {
+  id         Int     @id @default(autoincrement())
+  key        String  @unique // short slug, e.g. "oapractice"
+  name       String
+  baseUrl    String // https://oapractice.com
+  sitemapUrl String? // optional explicit sitemap; otherwise derived from baseUrl
+
+  // Defaults used when the source DB can't tell us the real counts.
+  defaultSets      Int @default(5)
+  defaultParts     Int @default(3)
+  defaultTimedSets Int @default(5)
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  exams Exam[]
+
+  @@index([active])
+}
+
+/// One exam on one site. ~22 links hang off this.
+model Exam {
+  id     Int  @id @default(autoincrement())
+  site   Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  siteId Int
+
+  examCode String // the ?ec= value, e.g. "D426" / "HESI E2" / "IREB"
+  examName String
+
+  landingUrl      String
+  practiceBaseUrl String? // extracted from landing page (full subdomain + ?ec=&set=1&part=1)
+  practiceSource  PracticeSource @default(NONE)
+  timedBaseUrl    String? // extracted: .../exam_sets/{slug}/set-1
+  timedSlug       String?
+  contactUrl      String?
+
+  // Resolved counts (DB-authoritative when available, else site defaults).
+  setsCount      Int @default(5)
+  partsCount     Int @default(3)
+  timedSetsCount Int @default(5)
+
+  // Source-DB cross-validation snapshot.
+  practiceDbExamId Int?
+  timedDbExamId    Int?
+  notes            String? // mismatches, anomalies surfaced during collection
+
+  status     String   @default("active") // active | stale | error
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  links     Link[]
+  incidents Incident[]
+
+  @@unique([siteId, examCode])
+  @@index([siteId])
+  @@index([status])
+}
+
+/// A single concrete URL we monitor and audit.
+model Link {
+  id     Int  @id @default(autoincrement())
+  exam   Exam @relation(fields: [examId], references: [id], onDelete: Cascade)
+  examId Int
+
+  type  LinkType
+  // 0 = not applicable (LANDING/CONTACT have no set/part; TIMED has no part).
+  // Non-null + 0 sentinel so the unique constraint actually enforces dedupe in
+  // Postgres (NULLs are treated as distinct and would allow duplicates).
+  setNo Int    @default(0) // practice + timed
+  part  Int    @default(0) // practice only
+  url   String
+
+  // What "healthy" looks like for this link (CSS selectors / text markers).
+  expectedMarkers Json?
+
+  active      Boolean   @default(true)
+  lastStatus  String? // up | down | degraded
+  lastCheckAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  results   CheckResult[]
+  incidents Incident[]
+
+  @@unique([examId, type, setNo, part])
+  @@index([type])
+  @@index([active])
+  @@index([lastStatus])
+}
+
+/// A batch run (one collection / uptime sweep / weekly audit).
+model CheckRun {
+  id         Int       @id @default(autoincrement())
+  type       RunType
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  summary    Json?
+
+  results CheckResult[]
+
+  @@index([type, startedAt])
+}
+
+/// The outcome of checking one link in one run.
+model CheckResult {
+  id     Int       @id @default(autoincrement())
+  link   Link?     @relation(fields: [linkId], references: [id], onDelete: SetNull)
+  linkId Int?
+  run    CheckRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+  runId  Int?
+
+  httpStatus Int?
+  latencyMs  Int?
+  ok         Boolean @default(false)
+  contentOk  Boolean? // Tier-1 markers present
+  dataOk     Boolean? // matches source-DB expectations
+  aiVerdict  Json? // Tier-2 structured verdict from Claude
+  screenshot String? // path on disk
+  error      String?
+
+  checkedAt DateTime @default(now())
+
+  @@index([linkId, checkedAt])
+  @@index([runId])
+}
+
+/// An open problem with a link. Opened on first failure, resolved when it recovers.
+model Incident {
+  id     Int   @id @default(autoincrement())
+  link   Link  @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  linkId Int
+  exam   Exam? @relation(fields: [examId], references: [id], onDelete: SetNull)
+  examId Int?
+
+  status     IncidentStatus @default(OPEN)
+  severity   String         @default("down") // down | degraded
+  openedAt   DateTime       @default(now())
+  resolvedAt DateTime?
+  notifiedAt DateTime?
+  lastError  String?
+
+  @@index([status])
+  @@index([linkId])
+}
