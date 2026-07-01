@@ -76,6 +76,28 @@ npx prisma migrate dev --name init    # generate the first migration (against a 
 #   npx prisma migrate deploy && npm run start
 ```
 
+## Troubleshooting
+
+**"Authentication failed against database server ... credentials for `auditor` are
+not valid"** (web 404s, worker crash-loops). Postgres sets its password only on the
+*first* initialization of its data volume. If an earlier deploy created the volume
+with a different `POSTGRES_PASSWORD`, later deploys can't authenticate. Fix (no real
+data yet, so safe):
+1. Set/confirm `POSTGRES_PASSWORD` in the app Environment.
+2. Stop the app.
+3. On the VPS: `docker volume ls | grep auditor_db` then
+   `docker volume rm <that_volume>` (remove the `db` container first if it's in use:
+   `docker rm -f <stack>-db-1`).
+4. Redeploy — Postgres re-initializes with the correct password.
+
+**"Bind for 0.0.0.0:3000 failed: port is already allocated."** Don't publish host
+ports in Dokploy; map a Domain to the `web` service's internal port 3000 instead.
+(The compose file already avoids publishing ports.)
+
+**Domain shows 404 but containers are up.** The `web` container is likely crash-
+looping (check its logs — usually the DB-auth issue above). Also confirm the Domain
+targets the `web` service on port 3000.
+
 ## Resource notes (KVM2)
 
 - `PLAYWRIGHT_CONCURRENCY=2` keeps Chromium memory in check. Raise cautiously.
