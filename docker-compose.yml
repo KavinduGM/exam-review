@@ -1,55 +1,15 @@
 # Local + Dokploy reference stack.
 #
 # In Dokploy: create a "Compose" application pointing at this repo, then paste your
-# values into the app's Environment tab. Dokploy interpolates ${VAR} below from that
-# Environment, so the containers receive them without needing a committed .env.
+# values into the app's Environment tab. Dokploy interpolates the ${VAR} refs below
+# from that Environment. (Env is inlined per-service on purpose — ${VAR} inside a
+# shared YAML anchor does not interpolate reliably on Dokploy.)
+#
+# The internal Postgres password is a FIXED literal on both the db service and the
+# app DATABASE_URL so they can never diverge (Postgres here is internal-only).
 #
 # The client source DBs are NOT defined here — the auditor connects to them
 # read-only over Dokploy's internal network via the SRC_* variables.
-
-x-app-env: &app-env
-  DATABASE_URL: "postgresql://auditor:${POSTGRES_PASSWORD:-auditor}@db:5432/auditor?schema=public"
-  REDIS_URL: "redis://redis:6379"
-  TZ: "${TZ:-UTC}"
-  # Source DBs (read-only). Use the Dokploy INTERNAL host of each DB service.
-  SRC_TIMED_HOST: "${SRC_TIMED_HOST:-}"
-  SRC_TIMED_PORT: "${SRC_TIMED_PORT:-3306}"
-  SRC_TIMED_USER: "${SRC_TIMED_USER:-auditor_ro}"
-  SRC_TIMED_PASSWORD: "${SRC_TIMED_PASSWORD:-}"
-  SRC_TIMED_DATABASE: "${SRC_TIMED_DATABASE:-onlineexam_db}"
-  SRC_PRACTICE_NEW_HOST: "${SRC_PRACTICE_NEW_HOST:-}"
-  SRC_PRACTICE_NEW_PORT: "${SRC_PRACTICE_NEW_PORT:-3306}"
-  SRC_PRACTICE_NEW_USER: "${SRC_PRACTICE_NEW_USER:-auditor_ro}"
-  SRC_PRACTICE_NEW_PASSWORD: "${SRC_PRACTICE_NEW_PASSWORD:-}"
-  SRC_PRACTICE_NEW_DATABASE: "${SRC_PRACTICE_NEW_DATABASE:-exam_db}"
-  SRC_PRACTICE_OLD_HOST: "${SRC_PRACTICE_OLD_HOST:-}"
-  SRC_PRACTICE_OLD_PORT: "${SRC_PRACTICE_OLD_PORT:-3306}"
-  SRC_PRACTICE_OLD_USER: "${SRC_PRACTICE_OLD_USER:-auditor_ro}"
-  SRC_PRACTICE_OLD_PASSWORD: "${SRC_PRACTICE_OLD_PASSWORD:-}"
-  SRC_PRACTICE_OLD_DATABASE: "${SRC_PRACTICE_OLD_DATABASE:-answers_db}"
-  # AI review
-  ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
-  ANTHROPIC_TRIAGE_MODEL: "${ANTHROPIC_TRIAGE_MODEL:-claude-haiku-4-5-20251001}"
-  ANTHROPIC_REVIEW_MODEL: "${ANTHROPIC_REVIEW_MODEL:-claude-sonnet-4-6}"
-  # Email
-  RESEND_API_KEY: "${RESEND_API_KEY:-}"
-  ALERT_FROM: "${ALERT_FROM:-alerts@example.com}"
-  ALERT_TO: "${ALERT_TO:-}"
-  # Dashboard auth
-  ADMIN_EMAIL: "${ADMIN_EMAIL:-}"
-  ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
-  AUTH_SECRET: "${AUTH_SECRET:-}"
-  # Schedules + tuning
-  UPTIME_CRON: "${UPTIME_CRON:-*/10 * * * *}"
-  COLLECT_CRON: "${COLLECT_CRON:-0 3 * * 1}"
-  AUDIT_CRON: "${AUDIT_CRON:-0 4 * * 1}"
-  HTTP_CONCURRENCY: "${HTTP_CONCURRENCY:-8}"
-  PLAYWRIGHT_CONCURRENCY: "${PLAYWRIGHT_CONCURRENCY:-2}"
-  HTTP_TIMEOUT_MS: "${HTTP_TIMEOUT_MS:-20000}"
-  AUDIT_SAMPLE_PCT: "${AUDIT_SAMPLE_PCT:-10}"
-  SCREENSHOT_DIR: "${SCREENSHOT_DIR:-./data/screenshots}"
-  PUBLIC_API_BASE: "${PUBLIC_API_BASE:-}"
-  NODE_ENV: "production"
 
 services:
   db:
@@ -57,7 +17,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: auditor
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-auditor}"
+      POSTGRES_PASSWORD: "auditor_internal_2026_pw" # must match DATABASE_URL below
       POSTGRES_DB: auditor
     volumes:
       - auditor_db:/var/lib/postgresql/data
@@ -83,11 +43,46 @@ services:
     build: .
     restart: unless-stopped
     environment:
-      <<: *app-env
-      PROCESS_ROLE: web # entrypoint: migrate schema, then run Next.js
+      PROCESS_ROLE: "web" # entrypoint: migrate schema, then run Next.js
+      NODE_ENV: "production"
+      DATABASE_URL: "postgresql://auditor:auditor_internal_2026_pw@db:5432/auditor?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      TZ: "${TZ:-UTC}"
+      SRC_TIMED_HOST: "${SRC_TIMED_HOST:-}"
+      SRC_TIMED_PORT: "${SRC_TIMED_PORT:-3306}"
+      SRC_TIMED_USER: "${SRC_TIMED_USER:-auditor_ro}"
+      SRC_TIMED_PASSWORD: "${SRC_TIMED_PASSWORD:-}"
+      SRC_TIMED_DATABASE: "${SRC_TIMED_DATABASE:-onlineexam_db}"
+      SRC_PRACTICE_NEW_HOST: "${SRC_PRACTICE_NEW_HOST:-}"
+      SRC_PRACTICE_NEW_PORT: "${SRC_PRACTICE_NEW_PORT:-3306}"
+      SRC_PRACTICE_NEW_USER: "${SRC_PRACTICE_NEW_USER:-auditor_ro}"
+      SRC_PRACTICE_NEW_PASSWORD: "${SRC_PRACTICE_NEW_PASSWORD:-}"
+      SRC_PRACTICE_NEW_DATABASE: "${SRC_PRACTICE_NEW_DATABASE:-exam_db}"
+      SRC_PRACTICE_OLD_HOST: "${SRC_PRACTICE_OLD_HOST:-}"
+      SRC_PRACTICE_OLD_PORT: "${SRC_PRACTICE_OLD_PORT:-3306}"
+      SRC_PRACTICE_OLD_USER: "${SRC_PRACTICE_OLD_USER:-auditor_ro}"
+      SRC_PRACTICE_OLD_PASSWORD: "${SRC_PRACTICE_OLD_PASSWORD:-}"
+      SRC_PRACTICE_OLD_DATABASE: "${SRC_PRACTICE_OLD_DATABASE:-answers_db}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      ANTHROPIC_TRIAGE_MODEL: "${ANTHROPIC_TRIAGE_MODEL:-claude-haiku-4-5-20251001}"
+      ANTHROPIC_REVIEW_MODEL: "${ANTHROPIC_REVIEW_MODEL:-claude-sonnet-4-6}"
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      ALERT_FROM: "${ALERT_FROM:-alerts@example.com}"
+      ALERT_TO: "${ALERT_TO:-}"
+      ADMIN_EMAIL: "${ADMIN_EMAIL:-}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+      AUTH_SECRET: "${AUTH_SECRET:-}"
+      UPTIME_CRON: "${UPTIME_CRON:-*/10 * * * *}"
+      COLLECT_CRON: "${COLLECT_CRON:-0 3 * * 1}"
+      AUDIT_CRON: "${AUDIT_CRON:-0 4 * * 1}"
+      HTTP_CONCURRENCY: "${HTTP_CONCURRENCY:-8}"
+      PLAYWRIGHT_CONCURRENCY: "${PLAYWRIGHT_CONCURRENCY:-2}"
+      HTTP_TIMEOUT_MS: "${HTTP_TIMEOUT_MS:-20000}"
+      AUDIT_SAMPLE_PCT: "${AUDIT_SAMPLE_PCT:-10}"
+      SCREENSHOT_DIR: "${SCREENSHOT_DIR:-./data/screenshots}"
+      PUBLIC_API_BASE: "${PUBLIC_API_BASE:-}"
     # No host port publishing: Dokploy's Traefik routes your Domain to this
-    # service's internal port 3000. (Publishing to the host collides with the
-    # proxy — "port is already allocated".) Map the Domain to port 3000 in Dokploy.
+    # service's internal port 3000. Map the Domain to port 3000 in Dokploy.
     expose:
       - "3000"
     volumes:
@@ -108,8 +103,44 @@ services:
     build: .
     restart: unless-stopped
     environment:
-      <<: *app-env
-      PROCESS_ROLE: worker # entrypoint: run the BullMQ worker
+      PROCESS_ROLE: "worker" # entrypoint: run the BullMQ worker
+      NODE_ENV: "production"
+      DATABASE_URL: "postgresql://auditor:auditor_internal_2026_pw@db:5432/auditor?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      TZ: "${TZ:-UTC}"
+      SRC_TIMED_HOST: "${SRC_TIMED_HOST:-}"
+      SRC_TIMED_PORT: "${SRC_TIMED_PORT:-3306}"
+      SRC_TIMED_USER: "${SRC_TIMED_USER:-auditor_ro}"
+      SRC_TIMED_PASSWORD: "${SRC_TIMED_PASSWORD:-}"
+      SRC_TIMED_DATABASE: "${SRC_TIMED_DATABASE:-onlineexam_db}"
+      SRC_PRACTICE_NEW_HOST: "${SRC_PRACTICE_NEW_HOST:-}"
+      SRC_PRACTICE_NEW_PORT: "${SRC_PRACTICE_NEW_PORT:-3306}"
+      SRC_PRACTICE_NEW_USER: "${SRC_PRACTICE_NEW_USER:-auditor_ro}"
+      SRC_PRACTICE_NEW_PASSWORD: "${SRC_PRACTICE_NEW_PASSWORD:-}"
+      SRC_PRACTICE_NEW_DATABASE: "${SRC_PRACTICE_NEW_DATABASE:-exam_db}"
+      SRC_PRACTICE_OLD_HOST: "${SRC_PRACTICE_OLD_HOST:-}"
+      SRC_PRACTICE_OLD_PORT: "${SRC_PRACTICE_OLD_PORT:-3306}"
+      SRC_PRACTICE_OLD_USER: "${SRC_PRACTICE_OLD_USER:-auditor_ro}"
+      SRC_PRACTICE_OLD_PASSWORD: "${SRC_PRACTICE_OLD_PASSWORD:-}"
+      SRC_PRACTICE_OLD_DATABASE: "${SRC_PRACTICE_OLD_DATABASE:-answers_db}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      ANTHROPIC_TRIAGE_MODEL: "${ANTHROPIC_TRIAGE_MODEL:-claude-haiku-4-5-20251001}"
+      ANTHROPIC_REVIEW_MODEL: "${ANTHROPIC_REVIEW_MODEL:-claude-sonnet-4-6}"
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      ALERT_FROM: "${ALERT_FROM:-alerts@example.com}"
+      ALERT_TO: "${ALERT_TO:-}"
+      ADMIN_EMAIL: "${ADMIN_EMAIL:-}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+      AUTH_SECRET: "${AUTH_SECRET:-}"
+      UPTIME_CRON: "${UPTIME_CRON:-*/10 * * * *}"
+      COLLECT_CRON: "${COLLECT_CRON:-0 3 * * 1}"
+      AUDIT_CRON: "${AUDIT_CRON:-0 4 * * 1}"
+      HTTP_CONCURRENCY: "${HTTP_CONCURRENCY:-8}"
+      PLAYWRIGHT_CONCURRENCY: "${PLAYWRIGHT_CONCURRENCY:-2}"
+      HTTP_TIMEOUT_MS: "${HTTP_TIMEOUT_MS:-20000}"
+      AUDIT_SAMPLE_PCT: "${AUDIT_SAMPLE_PCT:-10}"
+      SCREENSHOT_DIR: "${SCREENSHOT_DIR:-./data/screenshots}"
+      PUBLIC_API_BASE: "${PUBLIC_API_BASE:-}"
     volumes:
       - auditor_data:/app/data
     depends_on:
