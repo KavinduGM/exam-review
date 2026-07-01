@@ -10,8 +10,11 @@ export interface FetchResult {
   error?: string;
 }
 
+// A realistic browser UA — some CDNs/WAFs (Cloudflare) block non-browser agents.
+// The definitive allow is an IP allowlist on the sites (they're first-party), but a
+// browser UA avoids UA-based rules too.
 const USER_AGENT =
-  "WebSiteAuditor/0.1 (+monitoring; respects robots; contact kavindu@groovymark.com)";
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 /** GET a URL with a timeout, returning status + body (never throws). */
 export async function fetchUrl(url: string, opts: { method?: string; timeoutMs?: number } = {}): Promise<FetchResult> {
