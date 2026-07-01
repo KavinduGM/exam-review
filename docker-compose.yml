@@ -85,8 +85,11 @@ services:
     environment:
       <<: *app-env
       PROCESS_ROLE: web # entrypoint: migrate schema, then run Next.js
-    ports:
-      - "3000:3000"
+    # No host port publishing: Dokploy's Traefik routes your Domain to this
+    # service's internal port 3000. (Publishing to the host collides with the
+    # proxy — "port is already allocated".) Map the Domain to port 3000 in Dokploy.
+    expose:
+      - "3000"
     volumes:
       - auditor_data:/app/data
     healthcheck:
