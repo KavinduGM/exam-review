@@ -8,6 +8,7 @@ import { reconcileIncident } from "@/monitor/incidents";
 import { capture, closeBrowser } from "./screenshot";
 import { reviewScreenshot } from "./review";
 import { sendWeeklyDigest } from "@/notify/resend";
+import type { ProgressFn } from "@/lib/progress";
 
 type LinkWithExam = Link & { exam: Exam & { site: Site } };
 
@@ -21,7 +22,7 @@ export interface AuditSummary {
 }
 
 /** Weekly tiered audit: Tier-1 on all links, Tier-2 (screenshot + AI) on flagged + a sample. */
-export async function runWeeklyAudit(): Promise<AuditSummary> {
+export async function runWeeklyAudit(onProgress?: ProgressFn): Promise<AuditSummary> {
   const run = await prisma.checkRun.create({ data: { type: "AUDIT" } });
   const links = (await prisma.link.findMany({
     where: { active: true, exam: { status: { not: "stale" } } },
@@ -31,6 +32,7 @@ export async function runWeeklyAudit(): Promise<AuditSummary> {
   logger.info({ count: links.length }, "weekly audit: Tier-1 starting");
 
   // ── Tier 1: cheap HTTP + content + data-integrity on everything ──────────
+  let t1done = 0;
   const tier1 = await mapLimit(links, env.tuning.httpConcurrency, async (link) => {
     const outcome = await checkLink(link, link.exam, { keepBody: false });
     const result = await prisma.checkResult.create({
@@ -48,6 +50,10 @@ export async function runWeeklyAudit(): Promise<AuditSummary> {
     const status = outcome.ok ? "up" : outcome.contentOk === false || outcome.dataOk === false ? "degraded" : "down";
     await prisma.link.update({ where: { id: link.id }, data: { lastStatus: status, lastCheckAt: new Date() } });
     await reconcileIncident(link, link.exam, outcome);
+    t1done++;
+    if (t1done % 20 === 0 || t1done === links.length) {
+      onProgress?.({ phase: "audit", stage: "checks", checked: t1done, total: links.length });
+    }
     return { link, outcome, resultId: result.id, status };
   });
 
@@ -65,6 +71,7 @@ export async function runWeeklyAudit(): Promise<AuditSummary> {
 
   let aiReviewed = 0;
   let aiFlagged = 0;
+  let t2done = 0;
 
   await mapLimit(tier2Targets, env.tuning.playwrightConcurrency, async (t) => {
     const shot = await capture(t.link.url, `link-${t.link.id}-run-${run.id}`);
@@ -91,6 +98,9 @@ export async function runWeeklyAudit(): Promise<AuditSummary> {
     if (verdict && !verdict.healthy) {
       await prisma.link.update({ where: { id: t.link.id }, data: { lastStatus: "degraded" } });
     }
+
+    t2done++;
+    onProgress?.({ phase: "audit", stage: "ai-review", reviewed: t2done, total: tier2Targets.length, flagged: aiFlagged });
   });
 
   await closeBrowser();

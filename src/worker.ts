@@ -20,13 +20,16 @@ async function main() {
     QUEUE_NAME,
     async (job) => {
       logger.info({ job: job.name, id: job.id }, "job started");
+      const onProgress = (p: Record<string, unknown>) => {
+        void job.updateProgress(p as object);
+      };
       switch (job.name) {
         case "collect":
-          return collectAllSites();
+          return collectAllSites(onProgress);
         case "uptime":
-          return runUptimeSweep();
+          return runUptimeSweep(onProgress);
         case "audit":
-          return runWeeklyAudit();
+          return runWeeklyAudit(onProgress);
         default:
           throw new Error(`unknown job: ${job.name}`);
       }

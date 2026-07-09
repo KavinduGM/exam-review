@@ -5,6 +5,7 @@ import { fetchUrl, mapLimit } from "@/lib/http";
 import { env } from "@/lib/env";
 import { discoverCandidateUrls } from "./discover";
 import { extractExamFromLanding, type ExtractedExam } from "./extract";
+import type { ProgressFn } from "@/lib/progress";
 import { enumerateLinks } from "./enumerate";
 import { findPracticeExam, findTimedExamBySlug } from "@/sources";
 
@@ -186,12 +187,23 @@ function normalize(u: string): string {
 }
 
 /** Collect every active site. Records a COLLECT run with a summary. */
-export async function collectAllSites(): Promise<CollectSiteResult[]> {
+export async function collectAllSites(onProgress?: ProgressFn): Promise<CollectSiteResult[]> {
   const run = await prisma.checkRun.create({ data: { type: "COLLECT" } });
   const sites = await prisma.site.findMany({ where: { active: true } });
   const results: CollectSiteResult[] = [];
-  for (const site of sites) {
-    results.push(await collectSite(site, run.id));
+  let examsTotal = 0;
+  for (let i = 0; i < sites.length; i++) {
+    const r = await collectSite(sites[i], run.id);
+    results.push(r);
+    examsTotal += r.examsFound;
+    onProgress?.({
+      phase: "collect",
+      site: sites[i].key,
+      siteIndex: i + 1,
+      siteCount: sites.length,
+      examsFound: examsTotal,
+      linksUpserted: results.reduce((n, x) => n + x.linksUpserted, 0),
+    });
   }
   await prisma.checkRun.update({
     where: { id: run.id },

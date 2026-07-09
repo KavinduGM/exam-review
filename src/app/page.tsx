@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { RunButtons } from "./RunButtons";
+import { Activity } from "./Activity";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,7 @@ export default async function Dashboard() {
       </header>
 
       <div className="wrap">
+        <Activity />
         <div className="cards">
           <div className="card"><div className="n">{siteCount}</div><div className="l">Sites</div></div>
           <div className="card"><div className="n">{examCount}</div><div className="l">Exams</div></div>

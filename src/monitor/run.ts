@@ -6,6 +6,7 @@ import { mapLimit } from "@/lib/http";
 import { checkLink } from "./check";
 import { reconcileIncident } from "./incidents";
 import { sendDownAlert, sendRecoveryAlert, type DownItem } from "@/notify/resend";
+import type { ProgressFn } from "@/lib/progress";
 
 export interface SweepSummary {
   runId: number;
@@ -17,7 +18,7 @@ export interface SweepSummary {
 }
 
 /** Run an uptime sweep over every active link. */
-export async function runUptimeSweep(): Promise<SweepSummary> {
+export async function runUptimeSweep(onProgress?: ProgressFn): Promise<SweepSummary> {
   const run = await prisma.checkRun.create({ data: { type: "UPTIME" } });
   const links = await prisma.link.findMany({
     where: { active: true, exam: { status: { not: "stale" } } },
@@ -30,6 +31,7 @@ export async function runUptimeSweep(): Promise<SweepSummary> {
   const resolved: DownItem[] = [];
   let down = 0;
   let degraded = 0;
+  let done = 0;
 
   await mapLimit(links, env.tuning.httpConcurrency, async (link) => {
     const outcome = await checkLink(link, link.exam);
@@ -59,6 +61,11 @@ export async function runUptimeSweep(): Promise<SweepSummary> {
     const t = await reconcileIncident(link, link.exam, outcome);
     if (t.opened) opened.push(t.opened);
     if (t.resolved) resolved.push(t.resolved);
+
+    done++;
+    if (done % 20 === 0 || done === links.length) {
+      onProgress?.({ phase: "uptime", checked: done, total: links.length, down, degraded });
+    }
   });
 
   const summary: SweepSummary = {
