@@ -68,7 +68,7 @@ export const env = {
 
   cron: {
     uptime: str("UPTIME_CRON", "*/10 * * * *"),
-    collect: str("COLLECT_CRON", "0 3 * * 1"),
+    collect: str("COLLECT_CRON", "0 3 * * *"), // daily — backfills exam names as they're added
     audit: str("AUDIT_CRON", "0 4 * * 1"),
   },
 

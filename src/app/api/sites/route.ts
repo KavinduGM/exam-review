@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { ensureGroups } from "@/lib/groups";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,7 @@ export async function POST(req: Request) {
         defaultTimedSets: d.defaultTimedSets ?? 5,
       },
     });
+    await ensureGroups(); // assign the new site to a (standalone) group
     return NextResponse.json({ ok: true, site });
   } catch (err) {
     const msg = err instanceof Error && err.message.includes("Unique") ? `key "${d.key}" already exists` : "could not create site";

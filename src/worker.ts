@@ -8,12 +8,14 @@ import { logger } from "@/lib/logger";
 import { QUEUE_NAME } from "@/queue/queues";
 import { registerSchedules } from "@/queue/scheduler";
 import { ensureSitesSeeded } from "@/lib/seed";
+import { ensureGroups } from "@/lib/groups";
 import { collectAllSites } from "@/collector/collect";
 import { runUptimeSweep } from "@/monitor/run";
 import { runWeeklyAudit } from "@/audit/run";
 
 async function main() {
   await ensureSitesSeeded();
+  await ensureGroups();
   await registerSchedules();
 
   const worker = new Worker(

@@ -25,12 +25,14 @@ export default async function Dashboard() {
         take: 50,
       }),
       prisma.site.findMany({
-        include: { _count: { select: { exams: true } } },
+        include: { _count: { select: { exams: true } }, group: true },
         orderBy: { key: "asc" },
       }),
       prisma.checkRun.findMany({ orderBy: { startedAt: "desc" }, take: 6 }),
       prisma.checkRun.findFirst({ where: { type: "COLLECT", finishedAt: { not: null } }, orderBy: { startedAt: "desc" } }),
     ]);
+
+  const groups = await prisma.siteGroup.findMany({ include: { sites: { select: { key: true } } }, orderBy: { key: "asc" } });
 
   const coverage = (lastCollect?.summary ?? null) as null | {
     dbConnected?: boolean;
@@ -70,6 +72,7 @@ export default async function Dashboard() {
             key: s.key,
             name: s.name,
             type: s.type,
+            group: s.group?.key ?? "—",
             baseUrl: s.baseUrl,
             active: s.active,
             exams: s._count.exams,
@@ -154,10 +157,28 @@ export default async function Dashboard() {
           </tbody>
         </table>
 
-        <h2>API for the YouTube system</h2>
+        <h2>Exam groups &amp; export (for the YouTube system)</h2>
         <p className="muted">
-          <code>GET /api/exams/&#123;site&#125;/&#123;code&#125;</code> — all links for one exam.{" "}
-          <code>GET /api/exams?site=oapractice</code> — list/search exams. Both are public (no auth).
+          Exams are grouped by brand. OAP + OAG share one exam name; nursing/state are standalone.
+          The grouped export returns every link under the canonical exam name (timed deduped).
+        </p>
+        <table>
+          <thead><tr><th>Group</th><th>Name</th><th>Prefix</th><th>Sites</th><th>Export</th></tr></thead>
+          <tbody>
+            {groups.map((g) => (
+              <tr key={g.id}>
+                <td>{g.key}</td>
+                <td>{g.name}</td>
+                <td className="muted">{g.namePrefix || "—"}</td>
+                <td className="muted">{g.sites.map((s) => s.key).join(", ") || "—"}</td>
+                <td><code>/api/exam/{g.key}/&#123;code&#125;</code></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="muted" style={{ marginTop: 8 }}>
+          <code>GET /api/exam/&#123;group&#125;/&#123;code&#125;</code> — grouped links for one exam ·{" "}
+          <code>GET /api/exam-groups?group=oa</code> — list a group&apos;s exams. Public (no auth).
         </p>
       </div>
     </>

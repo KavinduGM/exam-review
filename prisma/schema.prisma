@@ -41,13 +41,29 @@ enum IncidentStatus {
   RESOLVED
 }
 
+/// A brand group. Sites in the same group share exams (by code+name) and their
+/// links are aggregated under one exam for export. Most groups hold a single site;
+/// OA (oapractice + oaguides) holds two.
+model SiteGroup {
+  id         Int      @id @default(autoincrement())
+  key        String   @unique // "oa", "nursing", "state", …
+  name       String
+  namePrefix String   @default("") // "WGU" / "HESI" … used to compose the canonical exam name
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  sites Site[]
+}
+
 /// A managed website (e.g. oapractice). New sites are added here; the collector
-/// discovers their exams automatically from the sitemap.
+/// discovers their exams automatically.
 model Site {
   id         Int      @id @default(autoincrement())
   key        String   @unique // short slug, e.g. "oapractice"
   name       String
   type       SiteType @default(EXAM)
+  group      SiteGroup? @relation(fields: [groupId], references: [id])
+  groupId    Int?
   baseUrl    String // https://oapractice.com
   sitemapUrl String? // optional explicit sitemap; otherwise derived from baseUrl
 
@@ -73,6 +89,7 @@ model Exam {
 
   examCode String // the ?ec= value, e.g. "D426" / "HESI E2" / "IREB"
   examName String
+  nameResolved Boolean @default(false) // true once the name came from the exam DB (else code placeholder)
 
   landingUrl      String
   practiceBaseUrl String? // extracted from landing page (full subdomain + ?ec=&set=1&part=1)

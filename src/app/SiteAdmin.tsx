@@ -8,6 +8,7 @@ export interface SiteRow {
   key: string;
   name: string;
   type: string;
+  group: string;
   baseUrl: string;
   active: boolean;
   exams: number;
@@ -114,13 +115,14 @@ export function SiteAdmin({ sites }: { sites: SiteRow[] }) {
       )}
 
       <table>
-        <thead><tr><th>Key</th><th>Name</th><th>Type</th><th>Base URL</th><th>Structure</th><th>Exams</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Key</th><th>Name</th><th>Type</th><th>Group</th><th>Base URL</th><th>Structure</th><th>Exams</th><th>Status</th><th></th></tr></thead>
         <tbody>
           {sites.map((s) => (
             <tr key={s.id}>
               <td>{s.key}</td>
               <td>{s.name}</td>
               <td className="muted">{TYPE_LABEL[s.type] ?? s.type}</td>
+              <td className="muted">{s.group}</td>
               <td><a href={s.baseUrl} target="_blank" rel="noreferrer">{s.baseUrl}</a></td>
               <td className="muted">
                 {s.type === "EXAM" && `${s.defaultSets}×${s.defaultParts} practice · ${s.defaultTimedSets} timed`}

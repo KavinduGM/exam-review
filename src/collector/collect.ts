@@ -8,6 +8,7 @@ import { extractExamFromLanding, type ExtractedExam } from "./extract";
 import { enumerateLinks, type GeneratedLink, type PracticeBase, type EnumerateInput } from "./enumerate";
 import { constructPracticeUrl, constructTimedUrl, timedSetUrl, normalizeUrl, hostOf } from "./construct";
 import { loadTimedIndex, loadPracticeIndex, type TimedIndexEntry, type PracticeIndexEntry } from "@/sources";
+import { ensureGroups } from "@/lib/groups";
 import type { ProgressFn } from "@/lib/progress";
 
 const SKIP_PATTERNS = [
@@ -29,6 +30,15 @@ interface DbIndex {
   practiceByCode: Map<string, PracticeIndexEntry>; // merged (NEW wins) — for code derivation
   practiceNewByCode: Map<string, PracticeIndexEntry>; // questions.  (exam_db)
   practiceOldByCode: Map<string, PracticeIndexEntry>; // answers.    (answers_db)
+  // Canonical exam names from the timed (exam-manager) DB.
+  nameByLanding: Map<string, string>; // normalized back_link -> exam_name
+  nameByCode: Map<string, string>; // UPPER code (from slug) -> exam_name
+}
+
+/** Pull a course code out of a timed slug, e.g. "…-d216" -> "D216". */
+function codeFromSlug(slug: string): string | null {
+  const m = slug.match(/-([a-z]\d{2,4})(?:$|-)/i) ?? slug.match(/^([a-z]\d{2,4})$/i);
+  return m ? m[1].toUpperCase() : null;
 }
 
 async function buildDbIndex(): Promise<DbIndex> {
@@ -43,9 +53,18 @@ async function buildDbIndex(): Promise<DbIndex> {
   const practiceOldByCode = new Map<string, PracticeIndexEntry>();
   for (const p of practiceAll) (p.source === "NEW" ? practiceNewByCode : practiceOldByCode).set(p.examCode, p);
   const practiceByCode = new Map<string, PracticeIndexEntry>([...practiceOldByCode, ...practiceNewByCode]);
+
+  const nameByLanding = new Map<string, string>();
+  const nameByCode = new Map<string, string>();
+  for (const t of timedAll) {
+    if (t.backLink && t.examName) nameByLanding.set(normalizeUrl(t.backLink), t.examName);
+    const c = codeFromSlug(t.slug);
+    if (c && t.examName) nameByCode.set(c, t.examName);
+  }
+
   const connected = timedAll.length > 0 || practiceAll.length > 0;
   logger.info({ timed: timedAll.length, practiceNew: practiceNewByCode.size, practiceOld: practiceOldByCode.size, connected }, "DB index built");
-  return { connected, timedAll, timedByBackLink, timedBySlug, practiceAll, practiceByCode, practiceNewByCode, practiceOldByCode };
+  return { connected, timedAll, timedByBackLink, timedBySlug, practiceAll, practiceByCode, practiceNewByCode, practiceOldByCode, nameByLanding, nameByCode };
 }
 
 /** Confirm a constructed practice URL actually serves the exam (guards the 2nd
@@ -224,6 +243,7 @@ async function collectTimedHostSite(site: Site, dbIndex: DbIndex): Promise<Colle
         site,
         examCode: t.slug,
         examName: t.examName || t.slug,
+        nameResolved: Boolean(t.examName),
         landingUrl: timedSetUrl(t.slug, 1),
         practiceUrl: null,
         practiceSource: "NONE",
@@ -316,7 +336,15 @@ async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Prom
   const practiceInfo = practiceNew ?? practiceOld;
   const setsCount = practiceInfo?.setsCount && practiceInfo.setsCount > 0 ? practiceInfo.setsCount : site.defaultSets;
   const examCode = code ?? timedSlug ?? new URL(ex.landingUrl).pathname.replace(/\W+/g, "-");
-  const examName = timedInfo?.examName || practiceInfo?.examName || ex.title || examCode;
+
+  // Canonical name comes from the exam-manager (timed) DB. Exams not yet in it
+  // keep a code placeholder and get a real name on a later (daily) crawl.
+  const dbName =
+    dbIndex.nameByLanding.get(normalizeUrl(ex.landingUrl)) ??
+    timedInfo?.examName ??
+    (code ? dbIndex.nameByCode.get(code.toUpperCase()) : undefined);
+  const nameResolved = Boolean(dbName);
+  const examName = dbName || practiceInfo?.examName || ex.title || examCode;
 
   const notes: string[] = [];
   if (dbIndex.connected) {
@@ -330,6 +358,7 @@ async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Prom
     site,
     examCode,
     examName,
+    nameResolved,
     landingUrl: ex.landingUrl,
     practiceUrl: practices[0]?.baseUrl ?? null,
     practiceSource: ex.practiceSource,
@@ -389,6 +418,7 @@ interface ExamWrite {
   site: Site;
   examCode: string;
   examName: string;
+  nameResolved?: boolean;
   landingUrl: string;
   practiceUrl: string | null;
   practiceSource: "NEW" | "OLD" | "NONE";
@@ -406,6 +436,7 @@ interface ExamWrite {
 async function writeExam(w: ExamWrite): Promise<number> {
   const data = {
     examName: w.examName,
+    nameResolved: w.nameResolved ?? false,
     landingUrl: w.landingUrl,
     practiceBaseUrl: w.practiceUrl,
     practiceSource: w.practiceSource,
@@ -477,6 +508,7 @@ function pageName(url: string): string {
 /** Collect every active site. Records a COLLECT run with a coverage summary. */
 export async function collectAllSites(onProgress?: ProgressFn): Promise<CollectSiteResult[]> {
   const run = await prisma.checkRun.create({ data: { type: "COLLECT" } });
+  await ensureGroups();
   const dbIndex = await buildDbIndex();
   const sites = await prisma.site.findMany({ where: { active: true } });
   const results: CollectSiteResult[] = [];
