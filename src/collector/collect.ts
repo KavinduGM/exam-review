@@ -5,7 +5,7 @@ import { fetchUrl, mapLimit } from "@/lib/http";
 import { env } from "@/lib/env";
 import { discoverCandidateUrls, discoverAllPages } from "./discover";
 import { extractExamFromLanding, type ExtractedExam } from "./extract";
-import { enumerateLinks, type GeneratedLink } from "./enumerate";
+import { enumerateLinks, type GeneratedLink, type PracticeBase, type EnumerateInput } from "./enumerate";
 import { constructPracticeUrl, constructTimedUrl, timedSetUrl, normalizeUrl, hostOf } from "./construct";
 import { loadTimedIndex, loadPracticeIndex, type TimedIndexEntry, type PracticeIndexEntry } from "@/sources";
 import type { ProgressFn } from "@/lib/progress";
@@ -26,7 +26,9 @@ interface DbIndex {
   timedByBackLink: Map<string, TimedIndexEntry>;
   timedBySlug: Map<string, TimedIndexEntry>;
   practiceAll: PracticeIndexEntry[];
-  practiceByCode: Map<string, PracticeIndexEntry>;
+  practiceByCode: Map<string, PracticeIndexEntry>; // merged (NEW wins) — for code derivation
+  practiceNewByCode: Map<string, PracticeIndexEntry>; // questions.  (exam_db)
+  practiceOldByCode: Map<string, PracticeIndexEntry>; // answers.    (answers_db)
 }
 
 async function buildDbIndex(): Promise<DbIndex> {
@@ -37,12 +39,21 @@ async function buildDbIndex(): Promise<DbIndex> {
     if (t.backLink) timedByBackLink.set(normalizeUrl(t.backLink), t);
     if (t.slug) timedBySlug.set(t.slug, t);
   }
-  const practiceByCode = new Map<string, PracticeIndexEntry>();
-  for (const p of practiceAll) if (p.source === "OLD") practiceByCode.set(p.examCode, p);
-  for (const p of practiceAll) if (p.source === "NEW") practiceByCode.set(p.examCode, p);
+  const practiceNewByCode = new Map<string, PracticeIndexEntry>();
+  const practiceOldByCode = new Map<string, PracticeIndexEntry>();
+  for (const p of practiceAll) (p.source === "NEW" ? practiceNewByCode : practiceOldByCode).set(p.examCode, p);
+  const practiceByCode = new Map<string, PracticeIndexEntry>([...practiceOldByCode, ...practiceNewByCode]);
   const connected = timedAll.length > 0 || practiceAll.length > 0;
-  logger.info({ timed: timedAll.length, practice: practiceAll.length, connected }, "DB index built");
-  return { connected, timedAll, timedByBackLink, timedBySlug, practiceAll, practiceByCode };
+  logger.info({ timed: timedAll.length, practiceNew: practiceNewByCode.size, practiceOld: practiceOldByCode.size, connected }, "DB index built");
+  return { connected, timedAll, timedByBackLink, timedBySlug, practiceAll, practiceByCode, practiceNewByCode, practiceOldByCode };
+}
+
+/** Confirm a constructed practice URL actually serves the exam (guards the 2nd
+ *  subdomain so sites without an answers. host don't get false failures). */
+async function practiceUrlWorks(url: string): Promise<boolean> {
+  const res = await fetchUrl(url);
+  if (!res.ok || res.body.length < 500) return false;
+  return !/(page not found|404 not found|no questions (found|available))/i.test(res.body.slice(0, 4000));
 }
 
 export interface CollectSiteResult {
@@ -168,7 +179,7 @@ async function collectSimpleSite(site: Site, dbIndex: DbIndex): Promise<CollectS
         timedDbExamId: null,
         notes: [],
       });
-      await syncLinksList(examId, [{ type: "LANDING", setNo: 0, part: 0, url }]);
+      await syncLinksList(examId, [{ type: "LANDING", setNo: 0, part: 0, variant: "", url }]);
       seen.push(examId);
       result.examsFound++;
       result.linksUpserted++;
@@ -207,7 +218,7 @@ async function collectTimedHostSite(site: Site, dbIndex: DbIndex): Promise<Colle
   for (const t of entries) {
     const sets = t.setsCount > 0 ? t.setsCount : site.defaultTimedSets;
     const links: GeneratedLink[] = [];
-    for (let i = 1; i <= sets; i++) links.push({ type: "TIMED", setNo: i, part: 0, url: timedSetUrl(t.slug, i) });
+    for (let i = 1; i <= sets; i++) links.push({ type: "TIMED", setNo: i, part: 0, variant: "", url: timedSetUrl(t.slug, i) });
     try {
       const examId = await writeExam({
         site,
@@ -260,40 +271,58 @@ interface UpsertResult {
 }
 
 async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Promise<UpsertResult> {
-  const practiceInfo = ex.examCode ? dbIndex.practiceByCode.get(ex.examCode) : undefined;
+  const code = ex.examCode;
+  const practiceNew = code ? dbIndex.practiceNewByCode.get(code) : undefined; // questions.
+  const practiceOld = code ? dbIndex.practiceOldByCode.get(code) : undefined; // answers.
   const timedInfo =
     (ex.timedSlug ? dbIndex.timedBySlug.get(ex.timedSlug) : undefined) ?? dbIndex.timedByBackLink.get(normalizeUrl(ex.landingUrl));
 
-  let practiceUrl = ex.practiceUrl;
-  let practiceSource = ex.practiceSource;
-  const constructed: string[] = [];
-  if (!practiceUrl && practiceInfo) {
-    practiceSource = practiceInfo.source;
-    practiceUrl = constructPracticeUrl(site.baseUrl, practiceInfo.source, ex.examCode ?? practiceInfo.examCode);
-    if (practiceUrl) constructed.push("practice");
+  const partsCount = site.defaultParts;
+  const practices: PracticeBase[] = [];
+  const seenVar = new Set<string>();
+  const addPractice = (variant: string, baseUrl: string | null, sets: number | undefined) => {
+    if (!baseUrl || seenVar.has(variant)) return;
+    practices.push({ variant, baseUrl, sets: sets && sets > 0 ? sets : site.defaultSets, parts: partsCount });
+    seenVar.add(variant);
+  };
+
+  // 1) The real link the landing page exposed (exact format, right subdomain).
+  if (ex.practiceUrl) {
+    const v = ex.practiceSource === "OLD" ? "answers" : "questions";
+    addPractice(v, ex.practiceUrl, (v === "answers" ? practiceOld : practiceNew)?.setsCount);
   }
+  // 2) questions. — valid whenever the code is in exam_db (shared, so always served).
+  if (code && practiceNew && !seenVar.has("questions")) {
+    addPractice("questions", constructPracticeUrl(site.baseUrl, "NEW", code), practiceNew.setsCount);
+  }
+  // 3) answers. — only when the code is in answers_db AND this site actually has
+  //    an answers. subdomain (probe the constructed URL to confirm).
+  if (code && practiceOld && !seenVar.has("answers")) {
+    const u = constructPracticeUrl(site.baseUrl, "OLD", code);
+    if (u && (await practiceUrlWorks(u))) addPractice("answers", u, practiceOld.setsCount);
+  }
+
   let timedUrl = ex.timedUrl;
   let timedSlug = ex.timedSlug;
+  const constructed: string[] = [];
   if (!timedUrl && timedInfo) {
     timedSlug = timedInfo.slug;
     timedUrl = constructTimedUrl(timedInfo.slug);
     constructed.push("timed");
   }
   const contactUrl = ex.contactUrl ?? timedInfo?.contactLink ?? null;
-
-  const setsCount = practiceInfo?.setsCount && practiceInfo.setsCount > 0 ? practiceInfo.setsCount : site.defaultSets;
   const timedSetsCount = timedInfo?.setsCount && timedInfo.setsCount > 0 ? timedInfo.setsCount : site.defaultTimedSets;
-  const partsCount = site.defaultParts;
 
-  const examCode = ex.examCode ?? timedSlug ?? new URL(ex.landingUrl).pathname.replace(/\W+/g, "-");
+  const practiceInfo = practiceNew ?? practiceOld;
+  const setsCount = practiceInfo?.setsCount && practiceInfo.setsCount > 0 ? practiceInfo.setsCount : site.defaultSets;
+  const examCode = code ?? timedSlug ?? new URL(ex.landingUrl).pathname.replace(/\W+/g, "-");
   const examName = timedInfo?.examName || practiceInfo?.examName || ex.title || examCode;
 
   const notes: string[] = [];
   if (dbIndex.connected) {
-    if (ex.examCode && !practiceInfo) notes.push("not in practice DB");
+    if (code && !practiceInfo) notes.push("not in practice DB");
+    if (practices.length > 1) notes.push(`practice on ${practices.map((p) => p.variant).join(" + ")}`);
     if (ex.timedSlug && !timedInfo) notes.push("timed slug not in DB");
-    if (timedInfo?.backLink && normalizeUrl(timedInfo.backLink) !== normalizeUrl(ex.landingUrl))
-      notes.push(`timed back_link differs: ${timedInfo.backLink}`);
     if (constructed.length) notes.push(`built from DB: ${constructed.join(", ")}`);
   }
 
@@ -302,8 +331,8 @@ async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Prom
     examCode,
     examName,
     landingUrl: ex.landingUrl,
-    practiceUrl,
-    practiceSource,
+    practiceUrl: practices[0]?.baseUrl ?? null,
+    practiceSource: ex.practiceSource,
     timedUrl,
     timedSlug,
     contactUrl,
@@ -315,16 +344,7 @@ async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Prom
     notes,
   });
 
-  const linkCount = await syncLinks(examId, {
-    landingUrl: ex.landingUrl,
-    practiceUrl,
-    timedUrl,
-    contactUrl,
-    setsCount,
-    partsCount,
-    timedSetsCount,
-  });
-
+  const linkCount = await syncLinks(examId, { landingUrl: ex.landingUrl, practices, timedUrl, contactUrl, timedSetsCount });
   return { examId, linkCount, practiceVerified: Boolean(practiceInfo), timedVerified: Boolean(timedInfo) };
 }
 
@@ -409,18 +429,7 @@ async function writeExam(w: ExamWrite): Promise<number> {
   return exam.id;
 }
 
-async function syncLinks(
-  examId: number,
-  input: {
-    landingUrl: string;
-    practiceUrl: string | null;
-    timedUrl: string | null;
-    contactUrl: string | null;
-    setsCount: number;
-    partsCount: number;
-    timedSetsCount: number;
-  },
-): Promise<number> {
+async function syncLinks(examId: number, input: EnumerateInput): Promise<number> {
   return syncLinksList(examId, enumerateLinks(input));
 }
 
@@ -428,15 +437,15 @@ async function syncLinks(
 async function syncLinksList(examId: number, generated: GeneratedLink[]): Promise<number> {
   const currentKeys = new Set<string>();
   for (const g of generated) {
-    currentKeys.add(`${g.type}:${g.setNo}:${g.part}`);
+    currentKeys.add(`${g.type}:${g.setNo}:${g.part}:${g.variant}`);
     await prisma.link.upsert({
-      where: { examId_type_setNo_part: { examId, type: g.type, setNo: g.setNo, part: g.part } },
-      create: { examId, type: g.type, setNo: g.setNo, part: g.part, url: g.url, active: true },
+      where: { examId_type_setNo_part_variant: { examId, type: g.type, setNo: g.setNo, part: g.part, variant: g.variant } },
+      create: { examId, type: g.type, setNo: g.setNo, part: g.part, variant: g.variant, url: g.url, active: true },
       update: { url: g.url, active: true },
     });
   }
-  const existing = await prisma.link.findMany({ where: { examId }, select: { id: true, type: true, setNo: true, part: true } });
-  const toDeactivate = existing.filter((l) => !currentKeys.has(`${l.type}:${l.setNo}:${l.part}`)).map((l) => l.id);
+  const existing = await prisma.link.findMany({ where: { examId }, select: { id: true, type: true, setNo: true, part: true, variant: true } });
+  const toDeactivate = existing.filter((l) => !currentKeys.has(`${l.type}:${l.setNo}:${l.part}:${l.variant}`)).map((l) => l.id);
   if (toDeactivate.length) await prisma.link.updateMany({ where: { id: { in: toDeactivate } }, data: { active: false } });
   return generated.length;
 }

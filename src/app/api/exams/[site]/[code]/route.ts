@@ -12,7 +12,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ site: string; 
 
   const exam = await prisma.exam.findFirst({
     where: { examCode, site: { key: site } },
-    include: { site: true, links: { where: { active: true }, orderBy: [{ type: "asc" }, { setNo: "asc" }, { part: "asc" }] } },
+    include: { site: true, links: { where: { active: true }, orderBy: [{ type: "asc" }, { variant: "asc" }, { setNo: "asc" }, { part: "asc" }] } },
   });
 
   if (!exam) {
@@ -31,7 +31,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ site: string; 
     contactUrl: exam.contactUrl,
     counts: { sets: exam.setsCount, parts: exam.partsCount, timedSets: exam.timedSetsCount },
     landing: byType("LANDING").map((l) => l.url)[0] ?? null,
-    practice: byType("PRACTICE").map((l) => ({ set: l.setNo, part: l.part, url: l.url, status: l.lastStatus })),
+    practice: byType("PRACTICE").map((l) => ({ set: l.setNo, part: l.part, subdomain: l.variant || "questions", url: l.url, status: l.lastStatus })),
     timed: byType("TIMED").map((l) => ({ set: l.setNo, url: l.url, status: l.lastStatus })),
     contact: byType("CONTACT").map((l) => l.url)[0] ?? null,
     lastSeenAt: exam.lastSeenAt,

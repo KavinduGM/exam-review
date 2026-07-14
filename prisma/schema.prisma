@@ -116,7 +116,10 @@ model Link {
   // Postgres (NULLs are treated as distinct and would allow duplicates).
   setNo Int    @default(0) // practice + timed
   part  Int    @default(0) // practice only
-  url   String
+  // Practice-subdomain discriminator: "questions" | "answers" (empty for others).
+  // Lets an exam carry practice links on BOTH subdomains without key collisions.
+  variant String @default("")
+  url     String
 
   // What "healthy" looks like for this link (CSS selectors / text markers).
   expectedMarkers Json?
@@ -130,7 +133,7 @@ model Link {
   results   CheckResult[]
   incidents Incident[]
 
-  @@unique([examId, type, setNo, part])
+  @@unique([examId, type, setNo, part, variant])
   @@index([type])
   @@index([active])
   @@index([lastStatus])

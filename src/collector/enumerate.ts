@@ -4,38 +4,44 @@ export interface GeneratedLink {
   type: LinkType;
   setNo: number; // 0 = not applicable
   part: number; // 0 = not applicable
+  variant: string; // practice subdomain ("questions"/"answers"); "" otherwise
   url: string;
+}
+
+/** One practice subdomain's base URL + its set/part structure. */
+export interface PracticeBase {
+  variant: string; // "questions" | "answers"
+  baseUrl: string; // …/practice-questions/C/?ec=CODE&set=1&part=1
+  sets: number;
+  parts: number;
 }
 
 export interface EnumerateInput {
   landingUrl: string;
-  practiceUrl: string | null;
+  practices: PracticeBase[];
   timedUrl: string | null;
   contactUrl: string | null;
-  setsCount: number;
-  partsCount: number;
   timedSetsCount: number;
 }
 
 /**
- * Expand the extracted base links into the full concrete link set:
- *   landing(1) + practice(sets × parts) + timed(sets) + contact(1).
- * Built by editing the real URLs so query/encoding quirks are preserved.
- * setNo/part use 0 (not null) when not applicable — see schema note.
+ * Expand the extracted/known bases into the full concrete link set:
+ *   landing(1) + practice(subdomains × sets × parts) + timed(sets) + contact(1).
  */
 export function enumerateLinks(input: EnumerateInput): GeneratedLink[] {
   const links: GeneratedLink[] = [];
 
-  links.push({ type: "LANDING", setNo: 0, part: 0, url: input.landingUrl });
+  links.push({ type: "LANDING", setNo: 0, part: 0, variant: "", url: input.landingUrl });
 
-  if (input.practiceUrl) {
-    for (let set = 1; set <= input.setsCount; set++) {
-      for (let part = 1; part <= input.partsCount; part++) {
+  for (const p of input.practices) {
+    for (let set = 1; set <= p.sets; set++) {
+      for (let part = 1; part <= p.parts; part++) {
         links.push({
           type: "PRACTICE",
           setNo: set,
           part,
-          url: withQuery(input.practiceUrl, { set: String(set), part: String(part) }),
+          variant: p.variant,
+          url: withQuery(p.baseUrl, { set: String(set), part: String(part) }),
         });
       }
     }
@@ -43,12 +49,12 @@ export function enumerateLinks(input: EnumerateInput): GeneratedLink[] {
 
   if (input.timedUrl) {
     for (let set = 1; set <= input.timedSetsCount; set++) {
-      links.push({ type: "TIMED", setNo: set, part: 0, url: withTimedSet(input.timedUrl, set) });
+      links.push({ type: "TIMED", setNo: set, part: 0, variant: "", url: withTimedSet(input.timedUrl, set) });
     }
   }
 
   if (input.contactUrl) {
-    links.push({ type: "CONTACT", setNo: 0, part: 0, url: input.contactUrl });
+    links.push({ type: "CONTACT", setNo: 0, part: 0, variant: "", url: input.contactUrl });
   }
 
   return links;
@@ -64,7 +70,6 @@ function withQuery(url: string, params: Record<string, string>): string {
   }
 }
 
-/** Replace the trailing /set-N segment with the requested set number. */
 function withTimedSet(url: string, set: number): string {
   return url.replace(/\/set-\d+(\/?$)/i, `/set-${set}$1`);
 }
