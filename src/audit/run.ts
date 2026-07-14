@@ -8,6 +8,7 @@ import { reconcileIncident } from "@/monitor/incidents";
 import { capture, closeBrowser } from "./screenshot";
 import { reviewScreenshot } from "./review";
 import { checkImages, type BrokenImage } from "./images";
+import { reviewPracticeFlows, type FlowResult } from "./flow";
 import { sendWeeklyDigest } from "@/notify/resend";
 import type { ProgressFn } from "@/lib/progress";
 
@@ -20,6 +21,8 @@ export interface AuditSummary {
   degraded: number;
   aiReviewed: number;
   aiFlagged: number;
+  flowsChecked: number;
+  flowsBroken: number;
 }
 
 /** Weekly tiered audit: Tier-1 on all links, Tier-2 (screenshot + AI) on flagged + a sample. */
@@ -144,10 +147,25 @@ export async function runWeeklyAudit(onProgress?: ProgressFn): Promise<AuditSumm
 
   await closeBrowser();
 
-  const summary: AuditSummary = { runId: run.id, checked: links.length, down, degraded, aiReviewed, aiFlagged };
-  await prisma.checkRun.update({ where: { id: run.id }, data: { finishedAt: new Date(), summary: summary as unknown as Prisma.InputJsonValue } });
+  // Practice-flow structural review: Set→Part sequence + end-of-flow home page.
+  const flows = await reviewPracticeFlows(tier1.map((t) => ({ link: t.link, status: t.status })));
+  const brokenFlows = flows.filter((f) => !f.ok);
+  logger.info({ checked: flows.length, broken: brokenFlows.length }, "weekly audit: practice-flow review");
 
-  await sendWeeklyDigest(buildDigest(tier1, summary), { checked: links.length, down, degraded });
+  const summary: AuditSummary = {
+    runId: run.id,
+    checked: links.length,
+    down,
+    degraded,
+    aiReviewed,
+    aiFlagged,
+    flowsChecked: flows.length,
+    flowsBroken: brokenFlows.length,
+  };
+  const stored = { ...summary, brokenFlows: brokenFlows.slice(0, 100) };
+  await prisma.checkRun.update({ where: { id: run.id }, data: { finishedAt: new Date(), summary: stored as unknown as Prisma.InputJsonValue } });
+
+  await sendWeeklyDigest(buildDigest(tier1, summary, brokenFlows), { checked: links.length, down, degraded });
 
   logger.info(summary, "weekly audit complete");
   return summary;
@@ -156,8 +174,24 @@ export async function runWeeklyAudit(onProgress?: ProgressFn): Promise<AuditSumm
 function buildDigest(
   tier1: { link: LinkWithExam; outcome: { error?: string }; status: string }[],
   summary: AuditSummary,
+  brokenFlows: FlowResult[] = [],
 ): string {
   const problems = tier1.filter((t) => t.status !== "up");
+  const flowRows = brokenFlows
+    .slice(0, 100)
+    .map(
+      (f) =>
+        `<tr><td>${esc(f.siteKey)}</td><td>${esc(f.examCode)}</td><td>${esc(f.variant)}</td><td>${f.upParts}/${f.totalParts} parts up</td><td>${
+          f.firstBroken ? "breaks at " + esc(f.firstBroken) : f.homeOk ? "" : "home page 404"
+        }</td></tr>`,
+    )
+    .join("");
+  const flowSection = brokenFlows.length
+    ? `<h3>Practice flow issues (${brokenFlows.length})</h3>
+       <table border="1" cellpadding="6" cellspacing="0">
+         <tr><th>Site</th><th>Exam</th><th>Subdomain</th><th>Parts</th><th>Problem</th></tr>${flowRows}
+       </table>`
+    : `<p>Practice flows OK (${summary.flowsChecked} checked).</p>`;
   const rows = problems
     .slice(0, 200)
     .map(
@@ -175,7 +209,9 @@ function buildDigest(
       <li>Links checked: <b>${summary.checked}</b></li>
       <li>Down: <b>${summary.down}</b> · Degraded: <b>${summary.degraded}</b></li>
       <li>AI-reviewed: <b>${summary.aiReviewed}</b> · AI-flagged: <b>${summary.aiFlagged}</b></li>
+      <li>Practice flows: <b>${summary.flowsChecked}</b> checked · <b>${summary.flowsBroken}</b> broken</li>
     </ul>
+    ${flowSection}
     <h3>Problems (${problems.length})</h3>
     <table border="1" cellpadding="6" cellspacing="0">
       <tr><th>Site</th><th>Exam</th><th>Link</th><th>Status</th><th>Detail</th><th>URL</th></tr>${rows}

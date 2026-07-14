@@ -32,6 +32,16 @@ export default async function Dashboard() {
       prisma.checkRun.findFirst({ where: { type: "COLLECT", finishedAt: { not: null } }, orderBy: { startedAt: "desc" } }),
     ]);
 
+  const lastAudit = await prisma.checkRun.findFirst({
+    where: { type: "AUDIT", finishedAt: { not: null } },
+    orderBy: { startedAt: "desc" },
+  });
+  const auditSummary = (lastAudit?.summary ?? null) as null | {
+    flowsChecked?: number;
+    flowsBroken?: number;
+    brokenFlows?: { siteKey: string; examCode: string; variant: string; upParts: number; totalParts: number; firstBroken: string | null; homeOk: boolean }[];
+  };
+
   const groups = await prisma.siteGroup.findMany({ include: { sites: { select: { key: true } } }, orderBy: { key: "asc" } });
 
   const coverage = (lastCollect?.summary ?? null) as null | {
@@ -114,6 +124,35 @@ export default async function Dashboard() {
                 })}
               </tbody>
             </table>
+          </>
+        )}
+
+        {auditSummary && (
+          <>
+            <h2>
+              Practice flow{" "}
+              <span className="muted">
+                ({auditSummary.flowsChecked ?? 0} checked, {auditSummary.flowsBroken ?? 0} broken — last weekly audit)
+              </span>
+            </h2>
+            {(auditSummary.brokenFlows?.length ?? 0) === 0 ? (
+              <p className="muted">All practice flows pass (every Set→Part sequence + home page loads). 🎉</p>
+            ) : (
+              <table>
+                <thead><tr><th>Site</th><th>Exam</th><th>Subdomain</th><th>Parts up</th><th>Problem</th></tr></thead>
+                <tbody>
+                  {auditSummary.brokenFlows!.map((f, i) => (
+                    <tr key={i}>
+                      <td>{f.siteKey}</td>
+                      <td>{f.examCode}</td>
+                      <td className="muted">{f.variant}</td>
+                      <td>{f.upParts}/{f.totalParts}</td>
+                      <td>{f.firstBroken ? <span className="badge down">breaks at {f.firstBroken}</span> : !f.homeOk ? <span className="badge down">home page 404</span> : ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </>
         )}
 
