@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { RunButtons } from "./RunButtons";
 import { Activity } from "./Activity";
@@ -5,25 +6,15 @@ import { SiteAdmin } from "./SiteAdmin";
 
 export const dynamic = "force-dynamic";
 
-function badge(status: string | null) {
-  const s = status ?? "unknown";
-  return <span className={`badge ${s}`}>{s}</span>;
-}
-
 export default async function Dashboard() {
-  const [siteCount, examCount, activeLinks, downLinks, degradedLinks, openIncidents, sites, lastRuns, lastCollect] =
+  const [siteCount, examCount, activeLinks, downLinks, degradedLinks, openIncidentCount, sites, lastRuns, lastCollect] =
     await Promise.all([
       prisma.site.count(),
       prisma.exam.count(),
       prisma.link.count({ where: { active: true } }),
       prisma.link.count({ where: { active: true, lastStatus: "down" } }),
       prisma.link.count({ where: { active: true, lastStatus: "degraded" } }),
-      prisma.incident.findMany({
-        where: { status: "OPEN" },
-        include: { link: { include: { exam: { include: { site: true } } } } },
-        orderBy: { openedAt: "desc" },
-        take: 50,
-      }),
+      prisma.incident.count({ where: { status: "OPEN" } }),
       prisma.site.findMany({
         include: { _count: { select: { exams: true } }, group: true },
         orderBy: { key: "asc" },
@@ -31,6 +22,18 @@ export default async function Dashboard() {
       prisma.checkRun.findMany({ orderBy: { startedAt: "desc" }, take: 6 }),
       prisma.checkRun.findFirst({ where: { type: "COLLECT", finishedAt: { not: null } }, orderBy: { startedAt: "desc" } }),
     ]);
+
+  // Per-site issue counts for the drill-down (down/degraded links + open incidents).
+  const siteIssues = await Promise.all(
+    sites.map(async (s) => {
+      const [down, degraded, incidents] = await Promise.all([
+        prisma.link.count({ where: { active: true, lastStatus: "down", exam: { siteId: s.id } } }),
+        prisma.link.count({ where: { active: true, lastStatus: "degraded", exam: { siteId: s.id } } }),
+        prisma.incident.count({ where: { status: "OPEN", exam: { siteId: s.id } } }),
+      ]);
+      return { key: s.key, name: s.name, down, degraded, incidents, total: down + degraded + incidents };
+    }),
+  );
 
   const lastAudit = await prisma.checkRun.findFirst({
     where: { type: "AUDIT", finishedAt: { not: null } },
@@ -83,7 +86,7 @@ export default async function Dashboard() {
           <div className="card"><div className="n">{activeLinks}</div><div className="l">Active links</div></div>
           <div className="card"><div className="n" style={{ color: "var(--down)" }}>{downLinks}</div><div className="l">Down</div></div>
           <div className="card"><div className="n" style={{ color: "var(--degraded)" }}>{degradedLinks}</div><div className="l">Degraded</div></div>
-          <div className="card"><div className="n">{openIncidents.length}</div><div className="l">Open incidents</div></div>
+          <div className="card"><div className="n">{openIncidentCount}</div><div className="l">Open incidents</div></div>
         </div>
 
         <h2>AI review cost</h2>
@@ -178,30 +181,22 @@ export default async function Dashboard() {
           </>
         )}
 
-        <h2>Open incidents ({openIncidents.length})</h2>
-        {openIncidents.length === 0 ? (
-          <p className="muted">No open incidents. 🎉</p>
-        ) : (
-          <table>
-            <thead><tr><th>Site</th><th>Exam</th><th>Link</th><th>Severity</th><th>Error</th><th>Since</th></tr></thead>
-            <tbody>
-              {openIncidents.map((i) => (
-                <tr key={i.id}>
-                  <td>{i.link.exam.site.name}</td>
-                  <td>{i.link.exam.examName}</td>
-                  <td>
-                    <a href={i.link.url} target="_blank" rel="noreferrer">
-                      {i.link.type}{i.link.setNo ? ` s${i.link.setNo}${i.link.part ? `p${i.link.part}` : ""}` : ""}
-                    </a>
-                  </td>
-                  <td>{badge(i.severity)}</td>
-                  <td className="muted">{i.lastError ?? ""}</td>
-                  <td className="muted">{i.openedAt.toISOString().slice(0, 16).replace("T", " ")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <h2>Issues by site ({openIncidentCount} open incident{openIncidentCount === 1 ? "" : "s"})</h2>
+        <p className="muted">Pick a site to see its exams ranked by issues, then open one exam to see just its problems.</p>
+        <table>
+          <thead><tr><th>Site</th><th>Down</th><th>Degraded</th><th>Open incidents</th><th></th></tr></thead>
+          <tbody>
+            {siteIssues.map((s) => (
+              <tr key={s.key}>
+                <td><Link href={`/site/${s.key}`}>{s.name}</Link></td>
+                <td>{s.down > 0 ? <span className="badge down">{s.down}</span> : <span className="muted">0</span>}</td>
+                <td>{s.degraded > 0 ? <span className="badge degraded">{s.degraded}</span> : <span className="muted">0</span>}</td>
+                <td>{s.incidents > 0 ? <span className="badge down">{s.incidents}</span> : <span className="muted">0</span>}</td>
+                <td><Link href={`/site/${s.key}`}>View exams →</Link></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
 
         <h2>Recent runs</h2>
         <table>
