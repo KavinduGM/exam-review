@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { RunButtons } from "./RunButtons";
 import { Activity } from "./Activity";
+import { SiteAdmin } from "./SiteAdmin";
 
 export const dynamic = "force-dynamic";
 
@@ -63,20 +64,19 @@ export default async function Dashboard() {
           <div className="card"><div className="n">{openIncidents.length}</div><div className="l">Open incidents</div></div>
         </div>
 
-        <h2>Sites</h2>
-        <table>
-          <thead><tr><th>Key</th><th>Name</th><th>Base URL</th><th>Exams</th></tr></thead>
-          <tbody>
-            {sites.map((s) => (
-              <tr key={s.id}>
-                <td>{s.key}</td>
-                <td>{s.name}</td>
-                <td><a href={s.baseUrl} target="_blank" rel="noreferrer">{s.baseUrl}</a></td>
-                <td>{s._count.exams}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <SiteAdmin
+          sites={sites.map((s) => ({
+            id: s.id,
+            key: s.key,
+            name: s.name,
+            baseUrl: s.baseUrl,
+            active: s.active,
+            exams: s._count.exams,
+            defaultSets: s.defaultSets,
+            defaultParts: s.defaultParts,
+            defaultTimedSets: s.defaultTimedSets,
+          }))}
+        />
 
         <h2>Collection coverage {coverage?.dbConnected === false && <span className="muted">(DB not connected — crawl only)</span>}</h2>
         {!coverage ? (

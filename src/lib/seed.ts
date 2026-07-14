@@ -2,13 +2,17 @@ import { prisma } from "./prisma";
 import { logger } from "./logger";
 import { SITE_SEEDS, DEFAULT_PARTS, DEFAULT_SETS, DEFAULT_TIMED_SETS } from "@/config/sites";
 
-/** Ensure the configured sites exist in the master DB. Safe to run repeatedly. */
+/**
+ * Seed the initial sites ONLY on a fresh DB. After that, sites are managed
+ * entirely from the dashboard (add/edit/delete), so we never re-add a site the
+ * user deleted or overwrite their edits.
+ */
 export async function ensureSitesSeeded(): Promise<void> {
+  const existing = await prisma.site.count();
+  if (existing > 0) return;
   for (const s of SITE_SEEDS) {
-    await prisma.site.upsert({
-      where: { key: s.key },
-      update: { name: s.name, baseUrl: s.baseUrl, sitemapUrl: s.sitemapUrl ?? null },
-      create: {
+    await prisma.site.create({
+      data: {
         key: s.key,
         name: s.name,
         baseUrl: s.baseUrl,
@@ -19,5 +23,5 @@ export async function ensureSitesSeeded(): Promise<void> {
       },
     });
   }
-  logger.info({ count: SITE_SEEDS.length }, "sites seeded");
+  logger.info({ count: SITE_SEEDS.length }, "initial sites seeded (fresh DB)");
 }
