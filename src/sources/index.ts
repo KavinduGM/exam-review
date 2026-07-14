@@ -145,6 +145,79 @@ export async function listTimedBackLinks(): Promise<string[]> {
   }
 }
 
+// ── Full inventories (loaded once per collection run) ────────────────────────
+// These power DB-first discovery, link construction, and coverage reporting.
+
+export interface TimedIndexEntry {
+  dbExamId: number;
+  slug: string;
+  examName: string;
+  backLink: string | null;
+  contactLink: string | null;
+  setsCount: number;
+}
+
+export async function loadTimedIndex(): Promise<TimedIndexEntry[]> {
+  const cfg = env.sources.timed;
+  if (!cfg.enabled) return [];
+  try {
+    const rows = await query<{ exam_id: number; exam_name: string; slug: string; back_link: string | null; contact_link: string | null }>(
+      cfg,
+      "SELECT exam_id, exam_name, slug, back_link, contact_link FROM exams",
+    );
+    const counts = await query<{ exam_id: number; sets: number }>(
+      cfg,
+      "SELECT exam_id, COUNT(DISTINCT set_no) AS sets FROM questions GROUP BY exam_id",
+    );
+    const cmap = new Map(counts.map((c) => [c.exam_id, Number(c.sets)]));
+    return rows
+      .filter((r) => r.slug)
+      .map((r) => ({
+        dbExamId: r.exam_id,
+        slug: r.slug,
+        examName: r.exam_name,
+        backLink: r.back_link,
+        contactLink: r.contact_link,
+        setsCount: cmap.get(r.exam_id) ?? 0,
+      }));
+  } catch (err) {
+    logger.warn({ err }, "loadTimedIndex failed");
+    return [];
+  }
+}
+
+export interface PracticeIndexEntry {
+  dbExamId: number;
+  examCode: string;
+  examName: string;
+  setsCount: number;
+  source: "NEW" | "OLD";
+}
+
+async function loadPracticeFrom(cfg: typeof env.sources.practiceNew, source: "NEW" | "OLD"): Promise<PracticeIndexEntry[]> {
+  if (!cfg.enabled) return [];
+  try {
+    const rows = await query<{ id: number; exam_code: string; exam_name: string }>(cfg, "SELECT id, exam_code, exam_name FROM exams");
+    const counts = await query<{ exam_id: number; sets: number }>(
+      cfg,
+      "SELECT exam_id, COUNT(DISTINCT ques_set) AS sets FROM questions GROUP BY exam_id",
+    );
+    const cmap = new Map(counts.map((c) => [c.exam_id, Number(c.sets)]));
+    return rows.map((r) => ({ dbExamId: r.id, examCode: r.exam_code, examName: r.exam_name, setsCount: cmap.get(r.id) ?? 0, source }));
+  } catch (err) {
+    logger.warn({ err, source }, "loadPracticeIndex failed");
+    return [];
+  }
+}
+
+export async function loadPracticeIndex(): Promise<PracticeIndexEntry[]> {
+  const [neu, old] = await Promise.all([
+    loadPracticeFrom(env.sources.practiceNew, "NEW"),
+    loadPracticeFrom(env.sources.practiceOld, "OLD"),
+  ]);
+  return [...neu, ...old];
+}
+
 export async function timedQuestionCount(dbExamId: number, setNo: number): Promise<number | null> {
   const cfg = env.sources.timed;
   if (!cfg.enabled) return null;

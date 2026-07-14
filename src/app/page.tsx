@@ -10,7 +10,7 @@ function badge(status: string | null) {
 }
 
 export default async function Dashboard() {
-  const [siteCount, examCount, activeLinks, downLinks, degradedLinks, openIncidents, sites, lastRuns] =
+  const [siteCount, examCount, activeLinks, downLinks, degradedLinks, openIncidents, sites, lastRuns, lastCollect] =
     await Promise.all([
       prisma.site.count(),
       prisma.exam.count(),
@@ -28,7 +28,22 @@ export default async function Dashboard() {
         orderBy: { key: "asc" },
       }),
       prisma.checkRun.findMany({ orderBy: { startedAt: "desc" }, take: 6 }),
+      prisma.checkRun.findFirst({ where: { type: "COLLECT", finishedAt: { not: null } }, orderBy: { startedAt: "desc" } }),
     ]);
+
+  const coverage = (lastCollect?.summary ?? null) as null | {
+    dbConnected?: boolean;
+    dbTimedExams?: number;
+    dbPracticeExams?: number;
+    perSite?: {
+      siteKey: string;
+      examsFound: number;
+      dbSeeded: number;
+      timedExpected: number;
+      timedCollected: number;
+      practiceValidated: number;
+    }[];
+  };
 
   return (
     <>
@@ -62,6 +77,41 @@ export default async function Dashboard() {
             ))}
           </tbody>
         </table>
+
+        <h2>Collection coverage {coverage?.dbConnected === false && <span className="muted">(DB not connected — crawl only)</span>}</h2>
+        {!coverage ? (
+          <p className="muted">No collection run yet. Click “Collect links”.</p>
+        ) : (
+          <>
+            {coverage.dbConnected && (
+              <p className="muted">
+                Databases: <b>{coverage.dbTimedExams ?? 0}</b> timed exams, <b>{coverage.dbPracticeExams ?? 0}</b> practice exams known.
+              </p>
+            )}
+            <table>
+              <thead>
+                <tr><th>Site</th><th>Exams</th><th>From DB (seeded)</th><th>Timed collected / expected</th><th>Practice verified</th></tr>
+              </thead>
+              <tbody>
+                {(coverage.perSite ?? []).map((s) => {
+                  const gap = (s.timedExpected ?? 0) - (s.timedCollected ?? 0);
+                  return (
+                    <tr key={s.siteKey}>
+                      <td>{s.siteKey}</td>
+                      <td>{s.examsFound}</td>
+                      <td>{s.dbSeeded > 0 ? s.dbSeeded : <span className="muted">—</span>}</td>
+                      <td>
+                        {s.timedCollected}/{s.timedExpected}{" "}
+                        {gap > 0 ? <span className="badge down">{gap} missing</span> : s.timedExpected > 0 ? <span className="badge up">complete</span> : <span className="muted">—</span>}
+                      </td>
+                      <td>{s.practiceValidated}{coverage.dbConnected ? "" : <span className="muted"> (n/a)</span>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </>
+        )}
 
         <h2>Open incidents ({openIncidents.length})</h2>
         {openIncidents.length === 0 ? (
