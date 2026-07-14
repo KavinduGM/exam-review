@@ -186,6 +186,12 @@ model CheckResult {
   screenshot String? // path on disk
   error      String?
 
+  // AI review cost accounting (populated on Tier-2 reviews).
+  aiModel        String?
+  aiInputTokens  Int?
+  aiOutputTokens Int?
+  aiCostUsd      Float?
+
   checkedAt DateTime @default(now())
 
   @@index([linkId, checkedAt])

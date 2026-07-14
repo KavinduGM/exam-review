@@ -21,6 +21,7 @@ export interface AuditSummary {
   degraded: number;
   aiReviewed: number;
   aiFlagged: number;
+  aiCostUsd: number;
   flowsChecked: number;
   flowsBroken: number;
 }
@@ -115,25 +116,34 @@ export async function runWeeklyAudit(onProgress?: ProgressFn): Promise<AuditSumm
   let aiFlagged = 0;
   let t2done = 0;
 
+  let aiCostUsd = 0;
+
   await mapLimit(tier2Targets, env.tuning.playwrightConcurrency, async (t) => {
     const shot = await capture(t.link.url, `link-${t.link.id}-run-${run.id}`);
-    const verdict = shot.pngBase64
+    const review = shot.pngBase64
       ? await reviewScreenshot(t.link.type, shot.pngBase64, {
           flagged: !t.outcome.ok,
           hint: t.outcome.error ?? (shot.consoleErrors.length ? `console errors: ${shot.consoleErrors.join("; ")}` : undefined),
         })
       : null;
+    const verdict = review?.verdict ?? null;
+    const usage = review?.usage ?? null;
 
     if (verdict) {
       aiReviewed++;
       if (!verdict.healthy) aiFlagged++;
     }
+    if (usage) aiCostUsd += usage.costUsd;
 
     await prisma.checkResult.update({
       where: { id: t.resultId },
       data: {
         screenshot: shot.path,
         aiVerdict: verdict ? (verdict as unknown as Prisma.InputJsonValue) : undefined,
+        aiModel: usage?.model,
+        aiInputTokens: usage?.inputTokens,
+        aiOutputTokens: usage?.outputTokens,
+        aiCostUsd: usage?.costUsd,
       },
     });
 
@@ -144,6 +154,8 @@ export async function runWeeklyAudit(onProgress?: ProgressFn): Promise<AuditSumm
     t2done++;
     onProgress?.({ phase: "audit", stage: "ai-review", reviewed: t2done, total: tier2Targets.length, flagged: aiFlagged });
   });
+
+  logger.info({ aiReviewed, aiFlagged, aiCostUsd: aiCostUsd.toFixed(4) }, "weekly audit: AI review cost");
 
   await closeBrowser();
 
@@ -159,6 +171,7 @@ export async function runWeeklyAudit(onProgress?: ProgressFn): Promise<AuditSumm
     degraded,
     aiReviewed,
     aiFlagged,
+    aiCostUsd: Number(aiCostUsd.toFixed(4)),
     flowsChecked: flows.length,
     flowsBroken: brokenFlows.length,
   };
@@ -208,7 +221,7 @@ function buildDigest(
     <ul>
       <li>Links checked: <b>${summary.checked}</b></li>
       <li>Down: <b>${summary.down}</b> · Degraded: <b>${summary.degraded}</b></li>
-      <li>AI-reviewed: <b>${summary.aiReviewed}</b> · AI-flagged: <b>${summary.aiFlagged}</b></li>
+      <li>AI-reviewed: <b>${summary.aiReviewed}</b> · AI-flagged: <b>${summary.aiFlagged}</b> · cost <b>$${summary.aiCostUsd.toFixed(2)}</b></li>
       <li>Practice flows: <b>${summary.flowsChecked}</b> checked · <b>${summary.flowsBroken}</b> broken</li>
     </ul>
     ${flowSection}

@@ -44,6 +44,16 @@ export default async function Dashboard() {
 
   const groups = await prisma.siteGroup.findMany({ include: { sites: { select: { key: true } } }, orderBy: { key: "asc" } });
 
+  // AI review cost accounting (from stored per-review token usage).
+  const now = Date.now();
+  const since = (days: number) => new Date(now - days * 86400_000);
+  const [costAll, cost30, cost7] = await Promise.all([
+    prisma.checkResult.aggregate({ _sum: { aiCostUsd: true }, _count: { aiCostUsd: true } }),
+    prisma.checkResult.aggregate({ _sum: { aiCostUsd: true }, _count: { aiCostUsd: true }, where: { checkedAt: { gte: since(30) } } }),
+    prisma.checkResult.aggregate({ _sum: { aiCostUsd: true }, _count: { aiCostUsd: true }, where: { checkedAt: { gte: since(7) } } }),
+  ]);
+  const usd = (n: number | null | undefined) => `$${(n ?? 0).toFixed(2)}`;
+
   const coverage = (lastCollect?.summary ?? null) as null | {
     dbConnected?: boolean;
     dbTimedExams?: number;
@@ -75,6 +85,18 @@ export default async function Dashboard() {
           <div className="card"><div className="n" style={{ color: "var(--degraded)" }}>{degradedLinks}</div><div className="l">Degraded</div></div>
           <div className="card"><div className="n">{openIncidents.length}</div><div className="l">Open incidents</div></div>
         </div>
+
+        <h2>AI review cost</h2>
+        <div className="cards">
+          <div className="card"><div className="n">{usd(cost7._sum.aiCostUsd)}</div><div className="l">Last 7 days</div></div>
+          <div className="card"><div className="n">{usd(cost30._sum.aiCostUsd)}</div><div className="l">Last 30 days</div></div>
+          <div className="card"><div className="n">{usd(costAll._sum.aiCostUsd)}</div><div className="l">All time</div></div>
+          <div className="card"><div className="n">{costAll._count.aiCostUsd}</div><div className="l">AI reviews</div></div>
+        </div>
+        <p className="muted" style={{ marginTop: -8 }}>
+          Cost of Claude visual reviews (screenshots + vision). Tier-1 HTTP/content/image checks and uptime are free.
+          Rates are configurable via <code>ANTHROPIC_PRICING_JSON</code>.
+        </p>
 
         <SiteAdmin
           sites={sites.map((s) => ({

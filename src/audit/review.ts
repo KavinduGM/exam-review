@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { costUsd } from "@/lib/pricing";
 
 const client = env.anthropic.enabled ? new Anthropic({ apiKey: env.anthropic.apiKey }) : null;
 
@@ -34,18 +35,32 @@ const SYSTEM =
   "Set ctaWorking based only on whether buttons look enabled/real (you cannot click). Set imagesOk=false if ANY image is broken or missing — a broken-image placeholder icon, an empty framed box, or stray alt text/caption where a banner should be. " +
   "Be strict: blank pages, error text, missing content, broken layout, OR broken/missing images => healthy=false.";
 
+export interface ReviewUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
+export interface ReviewResult {
+  verdict: Verdict | null;
+  usage: ReviewUsage | null;
+}
+
 /**
  * Tier-2 visual review of a page screenshot.
  * `flagged` routes to the stronger model; healthy-sample uses the cheap one.
+ * Returns the verdict plus token usage/cost (usage is present even if parsing
+ * the verdict failed, since the tokens were still spent).
  */
 export async function reviewScreenshot(
   type: string,
   pngBase64: string,
   opts: { flagged?: boolean; hint?: string } = {},
-): Promise<Verdict | null> {
+): Promise<ReviewResult> {
   if (!client) {
     logger.info("Anthropic disabled (no ANTHROPIC_API_KEY) — skipping AI review");
-    return null;
+    return { verdict: null, usage: null };
   }
   const model = opts.flagged ? env.anthropic.reviewModel : env.anthropic.triageModel;
   const instruction = (PROMPTS[type] ?? PROMPTS.LANDING) + (opts.hint ? `\n\nContext: ${opts.hint}` : "");
@@ -66,18 +81,21 @@ export async function reviewScreenshot(
       ],
     });
 
+    const inputTokens = msg.usage?.input_tokens ?? 0;
+    const outputTokens = msg.usage?.output_tokens ?? 0;
+    const usage: ReviewUsage = { model, inputTokens, outputTokens, costUsd: costUsd(model, inputTokens, outputTokens) };
+
     const text = msg.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text).join("");
     const json = extractJson(text);
-    if (!json) return null;
-    const parsed = VerdictSchema.safeParse(json);
-    if (!parsed.success) {
-      logger.warn({ errors: parsed.error.issues }, "AI verdict failed schema validation");
-      return null;
+    const parsed = json ? VerdictSchema.safeParse(json) : null;
+    if (!parsed?.success) {
+      if (parsed) logger.warn({ errors: parsed.error.issues }, "AI verdict failed schema validation");
+      return { verdict: null, usage };
     }
-    return parsed.data;
+    return { verdict: parsed.data, usage };
   } catch (err) {
     logger.error({ err, model }, "AI review failed");
-    return null;
+    return { verdict: null, usage: null };
   }
 }
 
