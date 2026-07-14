@@ -30,6 +30,12 @@ enum RunType {
   AUDIT
 }
 
+enum SiteType {
+  EXAM // exam-prep site: landing pages with practice/timed/contact CTAs
+  SIMPLE // generic site: monitor every page's uptime (+ images)
+  TIMED_HOST // onlineexamtest-style: exams enumerated from the timed DB
+}
+
 enum IncidentStatus {
   OPEN
   RESOLVED
@@ -38,9 +44,10 @@ enum IncidentStatus {
 /// A managed website (e.g. oapractice). New sites are added here; the collector
 /// discovers their exams automatically from the sitemap.
 model Site {
-  id         Int     @id @default(autoincrement())
-  key        String  @unique // short slug, e.g. "oapractice"
+  id         Int      @id @default(autoincrement())
+  key        String   @unique // short slug, e.g. "oapractice"
   name       String
+  type       SiteType @default(EXAM)
   baseUrl    String // https://oapractice.com
   sitemapUrl String? // optional explicit sitemap; otherwise derived from baseUrl
 

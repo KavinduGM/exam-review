@@ -18,7 +18,12 @@ export function constructPracticeUrl(baseUrl: string, source: "NEW" | "OLD", cod
 
 /** onlineexamtest.com/exam_sets/{slug}/set-1 */
 export function constructTimedUrl(slug: string): string {
-  return `https://${TIMED_HOST}/exam_sets/${slug}/set-1`;
+  return timedSetUrl(slug, 1);
+}
+
+/** onlineexamtest.com/exam_sets/{slug}/set-{n} */
+export function timedSetUrl(slug: string, set: number): string {
+  return `https://${TIMED_HOST}/exam_sets/${slug}/set-${set}`;
 }
 
 /** Normalize a URL to host+path (no www, no trailing slash, lowercased) for matching. */

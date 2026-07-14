@@ -3,31 +3,23 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { fetchUrl, mapLimit } from "@/lib/http";
 import { env } from "@/lib/env";
-import { discoverCandidateUrls } from "./discover";
+import { discoverCandidateUrls, discoverAllPages } from "./discover";
 import { extractExamFromLanding, type ExtractedExam } from "./extract";
-import { enumerateLinks } from "./enumerate";
-import { constructPracticeUrl, constructTimedUrl, normalizeUrl, hostOf } from "./construct";
-import {
-  loadTimedIndex,
-  loadPracticeIndex,
-  type TimedIndexEntry,
-  type PracticeIndexEntry,
-} from "@/sources";
+import { enumerateLinks, type GeneratedLink } from "./enumerate";
+import { constructPracticeUrl, constructTimedUrl, timedSetUrl, normalizeUrl, hostOf } from "./construct";
+import { loadTimedIndex, loadPracticeIndex, type TimedIndexEntry, type PracticeIndexEntry } from "@/sources";
 import type { ProgressFn } from "@/lib/progress";
 
-// Sitemap/crawl URLs that are obviously not exam landing pages — skip the fetch.
 const SKIP_PATTERNS = [
   /\/(wp-content|wp-includes|wp-json|feed|tag|category|author|page\/\d+)\//i,
   /\.(jpg|jpeg|png|gif|webp|svg|css|js|pdf|xml|ico)(\?|$)/i,
   /\/(privacy|terms|about|blog|contact)\/?($|\?)/i,
 ];
-
 function isCandidate(url: string): boolean {
   return !SKIP_PATTERNS.some((re) => re.test(url));
 }
 
 // ── DB inventory (loaded once per run) ───────────────────────────────────────
-
 interface DbIndex {
   connected: boolean;
   timedAll: TimedIndexEntry[];
@@ -45,7 +37,6 @@ async function buildDbIndex(): Promise<DbIndex> {
     if (t.backLink) timedByBackLink.set(normalizeUrl(t.backLink), t);
     if (t.slug) timedBySlug.set(t.slug, t);
   }
-  // NEW wins over OLD on a code collision.
   const practiceByCode = new Map<string, PracticeIndexEntry>();
   for (const p of practiceAll) if (p.source === "OLD") practiceByCode.set(p.examCode, p);
   for (const p of practiceAll) if (p.source === "NEW") practiceByCode.set(p.examCode, p);
@@ -56,33 +47,47 @@ async function buildDbIndex(): Promise<DbIndex> {
 
 export interface CollectSiteResult {
   siteKey: string;
+  siteType: string;
   urlsScanned: number;
   examsFound: number;
   linksUpserted: number;
   dbConnected: boolean;
-  dbSeeded: number; // exams created from the DB that the crawl missed
-  timedExpected: number; // timed exams the DB says belong to this site
-  timedCollected: number; // of those, how many we have
-  practiceValidated: number; // collected exams whose code exists in the practice DB
+  dbSeeded: number;
+  timedExpected: number;
+  timedCollected: number;
+  practiceValidated: number;
   errors: string[];
 }
 
-/** Collect one site: discover, extract, enrich from DB, DB-seed misses, upsert. */
-export async function collectSite(site: Site, runId?: number, index?: DbIndex): Promise<CollectSiteResult> {
-  const dbIndex = index ?? (await buildDbIndex());
-  const log = logger.child({ site: site.key });
-  const result: CollectSiteResult = {
+function emptyResult(site: Site, dbConnected: boolean): CollectSiteResult {
+  return {
     siteKey: site.key,
+    siteType: site.type,
     urlsScanned: 0,
     examsFound: 0,
     linksUpserted: 0,
-    dbConnected: dbIndex.connected,
+    dbConnected,
     dbSeeded: 0,
     timedExpected: 0,
     timedCollected: 0,
     practiceValidated: 0,
     errors: [],
   };
+}
+
+/** Dispatch collection by site type. */
+export async function collectSite(site: Site, runId?: number, index?: DbIndex): Promise<CollectSiteResult> {
+  const dbIndex = index ?? (await buildDbIndex());
+  void runId;
+  if (site.type === "SIMPLE") return collectSimpleSite(site, dbIndex);
+  if (site.type === "TIMED_HOST") return collectTimedHostSite(site, dbIndex);
+  return collectExamSite(site, dbIndex);
+}
+
+// ── EXAM sites (the 4 exam-prep sites) ───────────────────────────────────────
+async function collectExamSite(site: Site, dbIndex: DbIndex): Promise<CollectSiteResult> {
+  const log = logger.child({ site: site.key });
+  const result = emptyResult(site, dbIndex.connected);
 
   const urls = (await discoverCandidateUrls(site)).filter(isCandidate);
   result.urlsScanned = urls.length;
@@ -105,17 +110,14 @@ export async function collectSite(site: Site, runId?: number, index?: DbIndex): 
       if (r.timedVerified) result.timedCollected++;
       if (r.practiceVerified) result.practiceValidated++;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      result.errors.push(`${url}: ${msg}`);
-      log.warn({ err, url }, "upsert failed");
+      result.errors.push(`${url}: ${err instanceof Error ? err.message : String(err)}`);
     }
   });
 
-  // ── DB-seed: timed exams the DB attributes to this site that the crawl missed.
+  // DB-seed timed exams the crawl missed for this site.
   const host = hostOf(site.baseUrl);
   const timedForSite = dbIndex.timedAll.filter((t) => t.backLink && hostOf(t.backLink) === host);
   result.timedExpected = timedForSite.length;
-
   for (const t of timedForSite) {
     if (!t.backLink || seenLandings.has(normalizeUrl(t.backLink))) continue;
     try {
@@ -132,19 +134,124 @@ export async function collectSite(site: Site, runId?: number, index?: DbIndex): 
     }
   }
 
-  // Mark exams we didn't see this run as stale (likely removed from the site).
-  if (seenExamIds.length > 0) {
-    await prisma.exam.updateMany({
-      where: { siteId: site.id, id: { notIn: seenExamIds } },
-      data: { status: "stale" },
-    });
-  }
-
-  void runId;
-  log.info(result, "site collection complete");
+  await markStale(site, seenExamIds);
+  log.info(result, "exam site collection complete");
   return result;
 }
 
+// ── SIMPLE sites (uptime of every page, e.g. a blog) ─────────────────────────
+async function collectSimpleSite(site: Site, dbIndex: DbIndex): Promise<CollectSiteResult> {
+  const log = logger.child({ site: site.key });
+  const result = emptyResult(site, dbIndex.connected);
+
+  const pages = await discoverAllPages(site);
+  result.urlsScanned = pages.length;
+  log.info({ count: pages.length }, "pages discovered (simple site)");
+
+  const seen: number[] = [];
+  await mapLimit(pages, env.tuning.httpConcurrency, async (url) => {
+    try {
+      const examId = await writeExam({
+        site,
+        examCode: pageCode(url),
+        examName: pageName(url),
+        landingUrl: url,
+        practiceUrl: null,
+        practiceSource: "NONE",
+        timedUrl: null,
+        timedSlug: null,
+        contactUrl: null,
+        setsCount: 0,
+        partsCount: 0,
+        timedSetsCount: 0,
+        practiceDbExamId: null,
+        timedDbExamId: null,
+        notes: [],
+      });
+      await syncLinksList(examId, [{ type: "LANDING", setNo: 0, part: 0, url }]);
+      seen.push(examId);
+      result.examsFound++;
+      result.linksUpserted++;
+    } catch (err) {
+      result.errors.push(`${url}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  });
+
+  await markStale(site, seen);
+  log.info(result, "simple site collection complete");
+  return result;
+}
+
+// ── TIMED_HOST (onlineexamtest.com: exams from the timed DB) ──────────────────
+async function collectTimedHostSite(site: Site, dbIndex: DbIndex): Promise<CollectSiteResult> {
+  const log = logger.child({ site: site.key });
+  const result = emptyResult(site, dbIndex.connected);
+
+  let entries: { slug: string; examName: string; setsCount: number; dbExamId: number | null }[] = dbIndex.timedAll.map((t) => ({
+    slug: t.slug,
+    examName: t.examName,
+    setsCount: t.setsCount,
+    dbExamId: t.dbExamId,
+  }));
+
+  // Fallback when the timed DB isn't connected: crawl exam_sets links off the site.
+  if (entries.length === 0) {
+    entries = await crawlTimedHost(site);
+    log.info({ count: entries.length }, "timed host: DB not connected, crawled exam_sets");
+  }
+
+  result.urlsScanned = entries.length;
+  result.timedExpected = entries.length;
+
+  const seen: number[] = [];
+  for (const t of entries) {
+    const sets = t.setsCount > 0 ? t.setsCount : site.defaultTimedSets;
+    const links: GeneratedLink[] = [];
+    for (let i = 1; i <= sets; i++) links.push({ type: "TIMED", setNo: i, part: 0, url: timedSetUrl(t.slug, i) });
+    try {
+      const examId = await writeExam({
+        site,
+        examCode: t.slug,
+        examName: t.examName || t.slug,
+        landingUrl: timedSetUrl(t.slug, 1),
+        practiceUrl: null,
+        practiceSource: "NONE",
+        timedUrl: timedSetUrl(t.slug, 1),
+        timedSlug: t.slug,
+        contactUrl: null,
+        setsCount: 0,
+        partsCount: 0,
+        timedSetsCount: sets,
+        practiceDbExamId: null,
+        timedDbExamId: t.dbExamId,
+        notes: [],
+      });
+      await syncLinksList(examId, links);
+      seen.push(examId);
+      result.examsFound++;
+      result.timedCollected++;
+      result.linksUpserted += links.length;
+    } catch (err) {
+      result.errors.push(`${t.slug}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  await markStale(site, seen);
+  log.info(result, "timed host collection complete");
+  return result;
+}
+
+async function crawlTimedHost(site: Site): Promise<{ slug: string; examName: string; setsCount: number; dbExamId: number | null }[]> {
+  const pages = await discoverAllPages(site);
+  const slugs = new Set<string>();
+  for (const u of pages) {
+    const m = u.match(/\/exam_sets\/([^/?#]+)/i);
+    if (m) slugs.add(decodeURIComponent(m[1]));
+  }
+  return [...slugs].map((slug) => ({ slug, examName: slug, setsCount: 0, dbExamId: null }));
+}
+
+// ── EXAM-site upsert (extract + DB enrich + construct) ───────────────────────
 interface UpsertResult {
   examId: number;
   linkCount: number;
@@ -153,13 +260,10 @@ interface UpsertResult {
 }
 
 async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Promise<UpsertResult> {
-  // DB lookups from the in-memory index (no per-exam queries).
   const practiceInfo = ex.examCode ? dbIndex.practiceByCode.get(ex.examCode) : undefined;
   const timedInfo =
-    (ex.timedSlug ? dbIndex.timedBySlug.get(ex.timedSlug) : undefined) ??
-    dbIndex.timedByBackLink.get(normalizeUrl(ex.landingUrl));
+    (ex.timedSlug ? dbIndex.timedBySlug.get(ex.timedSlug) : undefined) ?? dbIndex.timedByBackLink.get(normalizeUrl(ex.landingUrl));
 
-  // Resolve links, constructing from DB facts when the page didn't expose them.
   let practiceUrl = ex.practiceUrl;
   let practiceSource = ex.practiceSource;
   const constructed: string[] = [];
@@ -187,7 +291,7 @@ async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Prom
   const notes: string[] = [];
   if (dbIndex.connected) {
     if (ex.examCode && !practiceInfo) notes.push("not in practice DB");
-    if (ex.timedSlug && !dbIndex.timedBySlug.get(ex.timedSlug) && !timedInfo) notes.push("timed slug not in DB");
+    if (ex.timedSlug && !timedInfo) notes.push("timed slug not in DB");
     if (timedInfo?.backLink && normalizeUrl(timedInfo.backLink) !== normalizeUrl(ex.landingUrl))
       notes.push(`timed back_link differs: ${timedInfo.backLink}`);
     if (constructed.length) notes.push(`built from DB: ${constructed.join(", ")}`);
@@ -224,18 +328,13 @@ async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Prom
   return { examId, linkCount, practiceVerified: Boolean(practiceInfo), timedVerified: Boolean(timedInfo) };
 }
 
-/** Create an exam from a timed-DB row when the crawl never reached its landing page. */
 async function seedExamFromTimed(site: Site, t: TimedIndexEntry, dbIndex: DbIndex): Promise<UpsertResult> {
   const landingUrl = t.backLink as string;
-
-  // Best effort: if the landing page IS reachable, extract normally (richer).
   const res = await fetchUrl(landingUrl);
   if (res.ok && res.body) {
     const extracted = extractExamFromLanding(landingUrl, res.body);
     if (extracted) return upsertExam(site, extracted, dbIndex);
   }
-
-  // Otherwise synthesize from DB facts and let upsertExam enrich/construct.
   const code = deriveCode(landingUrl, t.slug, dbIndex.practiceByCode);
   const practice = code ? dbIndex.practiceByCode.get(code) : undefined;
   const synthetic: ExtractedExam = {
@@ -251,7 +350,6 @@ async function seedExamFromTimed(site: Site, t: TimedIndexEntry, dbIndex: DbInde
   return upsertExam(site, synthetic, dbIndex);
 }
 
-/** Try to find the practice exam_code for a DB-seeded exam from its landing path / slug. */
 function deriveCode(landingUrl: string, slug: string, byCode: Map<string, PracticeIndexEntry>): string | null {
   const candidates: string[] = [];
   try {
@@ -260,7 +358,6 @@ function deriveCode(landingUrl: string, slug: string, byCode: Map<string, Practi
   } catch {
     /* ignore */
   }
-  // Trailing code-looking token in the slug, e.g. ...-d426 -> D426.
   const m = slug.match(/-([a-z]\d{2,4})$/i);
   if (m) candidates.push(m[1].toUpperCase(), m[1].toLowerCase());
   for (const c of candidates) if (byCode.has(c)) return c;
@@ -268,7 +365,6 @@ function deriveCode(landingUrl: string, slug: string, byCode: Map<string, Practi
 }
 
 // ── DB writes ────────────────────────────────────────────────────────────────
-
 interface ExamWrite {
   site: Site;
   examCode: string;
@@ -325,7 +421,11 @@ async function syncLinks(
     timedSetsCount: number;
   },
 ): Promise<number> {
-  const generated = enumerateLinks(input);
+  return syncLinksList(examId, enumerateLinks(input));
+}
+
+/** Upsert the given link set for an exam and deactivate links no longer present. */
+async function syncLinksList(examId: number, generated: GeneratedLink[]): Promise<number> {
   const currentKeys = new Set<string>();
   for (const g of generated) {
     currentKeys.add(`${g.type}:${g.setNo}:${g.part}`);
@@ -339,6 +439,30 @@ async function syncLinks(
   const toDeactivate = existing.filter((l) => !currentKeys.has(`${l.type}:${l.setNo}:${l.part}`)).map((l) => l.id);
   if (toDeactivate.length) await prisma.link.updateMany({ where: { id: { in: toDeactivate } }, data: { active: false } });
   return generated.length;
+}
+
+async function markStale(site: Site, seenIds: number[]): Promise<void> {
+  if (seenIds.length > 0) {
+    await prisma.exam.updateMany({ where: { siteId: site.id, id: { notIn: seenIds } }, data: { status: "stale" } });
+  }
+}
+
+function pageCode(url: string): string {
+  try {
+    const p = new URL(url).pathname.replace(/\/+$/, "");
+    return (p === "" ? "home" : p.replace(/^\/+/, "").replace(/\W+/g, "-")).slice(0, 180) || "home";
+  } catch {
+    return url.replace(/\W+/g, "-").slice(0, 180);
+  }
+}
+
+function pageName(url: string): string {
+  try {
+    const p = new URL(url).pathname.replace(/\/+$/, "");
+    return p === "" ? "Home" : decodeURIComponent(p.split("/").filter(Boolean).pop() ?? p);
+  } catch {
+    return url;
+  }
 }
 
 /** Collect every active site. Records a COLLECT run with a coverage summary. */

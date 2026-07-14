@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 const CreateSite = z.object({
   key: z.string().min(2).max(40).regex(/^[a-z0-9-]+$/, "key must be lowercase letters, numbers, or dashes"),
   name: z.string().min(1).max(120),
+  type: z.enum(["EXAM", "SIMPLE", "TIMED_HOST"]).optional(),
   baseUrl: z.string().url("baseUrl must be a valid URL"),
   sitemapUrl: z.string().url().optional().or(z.literal("")),
   defaultSets: z.coerce.number().int().min(1).max(20).optional(),
@@ -36,6 +37,7 @@ export async function POST(req: Request) {
       data: {
         key: d.key,
         name: d.name,
+        type: d.type ?? "EXAM",
         baseUrl: d.baseUrl.replace(/\/+$/, ""),
         sitemapUrl: d.sitemapUrl ? d.sitemapUrl : null,
         defaultSets: d.defaultSets ?? 5,

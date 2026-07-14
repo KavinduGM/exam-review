@@ -69,6 +69,7 @@ export default async function Dashboard() {
             id: s.id,
             key: s.key,
             name: s.name,
+            type: s.type,
             baseUrl: s.baseUrl,
             active: s.active,
             exams: s._count.exams,

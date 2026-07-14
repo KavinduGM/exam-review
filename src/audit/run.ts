@@ -89,7 +89,10 @@ export async function runWeeklyAudit(onProgress?: ProgressFn): Promise<AuditSumm
 
   // ── Tier 2: screenshot + AI review — flagged + ALL landings + random sample ──
   const flagged = tier1.filter((t) => !t.outcome.ok);
-  const isReviewedLanding = (t: (typeof tier1)[number]) => env.tuning.reviewAllLandings && t.link.type === "LANDING";
+  // Full AI review of every landing only for EXAM sites (SIMPLE/blog pages get the
+  // cheap image check + the random sample, to keep screenshot cost bounded).
+  const isReviewedLanding = (t: (typeof tier1)[number]) =>
+    env.tuning.reviewAllLandings && t.link.type === "LANDING" && t.link.exam.site.type === "EXAM";
   const landings = tier1.filter((t) => t.outcome.ok && isReviewedLanding(t));
   const healthyOther = tier1.filter((t) => t.outcome.ok && !isReviewedLanding(t));
   const sampleCount = Math.ceil((healthyOther.length * env.tuning.auditSamplePct) / 100);

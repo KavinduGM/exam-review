@@ -102,3 +102,23 @@ export async function discoverCandidateUrls(site: Site): Promise<string[]> {
 
   return [...candidates];
 }
+
+const ASSET_RE = /\.(jpg|jpeg|png|gif|webp|svg|css|js|pdf|xml|ico|woff2?|ttf|zip|mp4)(\?|$)/i;
+
+/** Every same-domain page of a site (sitemap + homepage links). For SIMPLE (uptime) sites. */
+export async function discoverAllPages(site: { baseUrl: string; sitemapUrl: string | null }): Promise<string[]> {
+  const host = mainHost(site.baseUrl);
+  const pages = new Set<string>();
+
+  const sm = site.sitemapUrl || (await discoverSitemap(site.baseUrl));
+  if (sm) {
+    for (const u of await extractSitemap(sm)) if (sameSite(u, host) && !ASSET_RE.test(u)) pages.add(u.replace(/#.*$/, ""));
+  }
+
+  const home = await fetchUrl(site.baseUrl.replace(/\/+$/, "") + "/");
+  if (home.ok && home.body) for (const u of sameDomainLinks(site.baseUrl, home.body, host)) if (!ASSET_RE.test(u)) pages.add(u);
+
+  // Always include the homepage itself.
+  pages.add(site.baseUrl.replace(/\/+$/, "") + "/");
+  return [...pages];
+}
