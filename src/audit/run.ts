@@ -7,6 +7,7 @@ import { checkLink } from "@/monitor/check";
 import { reconcileIncident } from "@/monitor/incidents";
 import { capture, closeBrowser } from "./screenshot";
 import { reviewScreenshot } from "./review";
+import { checkImages, type BrokenImage } from "./images";
 import { sendWeeklyDigest } from "@/notify/resend";
 import type { ProgressFn } from "@/lib/progress";
 
@@ -31,10 +32,36 @@ export async function runWeeklyAudit(onProgress?: ProgressFn): Promise<AuditSumm
 
   logger.info({ count: links.length }, "weekly audit: Tier-1 starting");
 
-  // ── Tier 1: cheap HTTP + content + data-integrity on everything ──────────
+  // ── Tier 1: cheap HTTP + content + data-integrity (+ image integrity) ────
   let t1done = 0;
   const tier1 = await mapLimit(links, env.tuning.httpConcurrency, async (link) => {
-    const outcome = await checkLink(link, link.exam, { keepBody: false });
+    const wantImages = env.tuning.checkImages && link.type === "LANDING";
+    const raw = await checkLink(link, link.exam, { keepBody: wantImages });
+
+    // Verify every <img> on landing/article pages actually loads.
+    let brokenImages: BrokenImage[] = [];
+    if (wantImages && raw.ok && raw.body) {
+      const img = await checkImages(link.url, raw.body, { max: 40 });
+      brokenImages = img.broken;
+    }
+    const imgErr =
+      brokenImages.length > 0
+        ? `broken image(s): ${brokenImages.slice(0, 3).map((b) => `${b.src} (${b.reason})`).join(", ")}${
+            brokenImages.length > 3 ? ` +${brokenImages.length - 3} more` : ""
+          }`
+        : undefined;
+
+    // Fold a broken image into the outcome as "degraded" (page loads, banner lost).
+    // Keep only slim fields — never retain the page body in the tier1 array.
+    const outcome = {
+      httpStatus: raw.httpStatus,
+      latencyMs: raw.latencyMs,
+      ok: raw.ok && !imgErr,
+      contentOk: imgErr ? false : raw.contentOk,
+      dataOk: raw.dataOk,
+      error: raw.error ?? imgErr,
+    };
+
     const result = await prisma.checkResult.create({
       data: {
         linkId: link.id,
@@ -54,20 +81,29 @@ export async function runWeeklyAudit(onProgress?: ProgressFn): Promise<AuditSumm
     if (t1done % 20 === 0 || t1done === links.length) {
       onProgress?.({ phase: "audit", stage: "checks", checked: t1done, total: links.length });
     }
-    return { link, outcome, resultId: result.id, status };
+    return { link, outcome, resultId: result.id, status, brokenImages };
   });
 
   const down = tier1.filter((t) => t.status === "down").length;
   const degraded = tier1.filter((t) => t.status === "degraded").length;
 
-  // ── Tier 2: screenshot + AI review on flagged + random healthy sample ────
+  // ── Tier 2: screenshot + AI review — flagged + ALL landings + random sample ──
   const flagged = tier1.filter((t) => !t.outcome.ok);
-  const healthy = tier1.filter((t) => t.outcome.ok);
-  const sampleCount = Math.ceil((healthy.length * env.tuning.auditSamplePct) / 100);
-  const sample = shuffle(healthy).slice(0, sampleCount);
-  const tier2Targets = [...flagged, ...sample];
+  const isReviewedLanding = (t: (typeof tier1)[number]) => env.tuning.reviewAllLandings && t.link.type === "LANDING";
+  const landings = tier1.filter((t) => t.outcome.ok && isReviewedLanding(t));
+  const healthyOther = tier1.filter((t) => t.outcome.ok && !isReviewedLanding(t));
+  const sampleCount = Math.ceil((healthyOther.length * env.tuning.auditSamplePct) / 100);
+  const sample = shuffle(healthyOther).slice(0, sampleCount);
 
-  logger.info({ flagged: flagged.length, sample: sample.length }, "weekly audit: Tier-2 starting");
+  // Union + dedupe by result id (a flagged landing shouldn't be reviewed twice).
+  const byId = new Map<number, (typeof tier1)[number]>();
+  for (const t of [...flagged, ...landings, ...sample]) byId.set(t.resultId, t);
+  const tier2Targets = [...byId.values()];
+
+  logger.info(
+    { flagged: flagged.length, landings: landings.length, sample: sample.length, total: tier2Targets.length },
+    "weekly audit: Tier-2 starting",
+  );
 
   let aiReviewed = 0;
   let aiFlagged = 0;

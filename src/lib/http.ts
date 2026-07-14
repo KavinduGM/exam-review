@@ -7,6 +7,7 @@ export interface FetchResult {
   ok: boolean;
   latencyMs: number;
   body: string;
+  contentType?: string;
   error?: string;
 }
 
@@ -17,7 +18,10 @@ const USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 /** GET a URL with a timeout, returning status + body (never throws). */
-export async function fetchUrl(url: string, opts: { method?: string; timeoutMs?: number } = {}): Promise<FetchResult> {
+export async function fetchUrl(
+  url: string,
+  opts: { method?: string; timeoutMs?: number; readBody?: boolean } = {},
+): Promise<FetchResult> {
   const timeoutMs = opts.timeoutMs ?? env.tuning.httpTimeoutMs;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -27,9 +31,10 @@ export async function fetchUrl(url: string, opts: { method?: string; timeoutMs?:
       method: opts.method ?? "GET",
       redirect: "follow",
       signal: controller.signal,
-      headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml,application/xml" },
+      headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml,application/xml,image/*" },
     });
-    const body = opts.method === "HEAD" ? "" : await res.text();
+    const shouldRead = opts.readBody !== false && opts.method !== "HEAD";
+    const body = shouldRead ? await res.text() : "";
     return {
       url,
       finalUrl: res.url || url,
@@ -37,6 +42,7 @@ export async function fetchUrl(url: string, opts: { method?: string; timeoutMs?:
       ok: res.ok,
       latencyMs: Date.now() - started,
       body,
+      contentType: res.headers.get("content-type") ?? undefined,
     };
   } catch (err) {
     return {

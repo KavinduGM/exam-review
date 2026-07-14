@@ -11,6 +11,7 @@ export const VerdictSchema = z.object({
   ctaPresent: z.boolean(),
   ctaWorking: z.boolean(),
   contentRendered: z.boolean(), // questions/exam content actually visible
+  imagesOk: z.boolean(), // no broken/missing images or CTA banners
   issues: z.array(z.string()),
   confidence: z.number().min(0).max(1),
   summary: z.string(),
@@ -19,7 +20,7 @@ export type Verdict = z.infer<typeof VerdictSchema>;
 
 const PROMPTS: Record<string, string> = {
   LANDING:
-    "This is an exam landing page. Check: does the layout look intact (not broken/blank/error)? Are the call-to-action buttons/links present (Study Guide, Free Practice Questions, Free Timed Exams, Contact)? Does anything look broken or like an error page?",
+    "This is an exam landing/article page. Check carefully: (1) does the layout look intact (not broken/blank/error)? (2) Are the call-to-action buttons/links present (Study Guide, Free Practice Questions, Free Timed Exams, Contact)? (3) IMPORTANT — are there any BROKEN or MISSING IMAGES, especially a CTA banner? A broken image shows as an empty box, a broken-image icon (a small square with '?'), or just alt text like a caption sitting on a blank area where a promotional banner should be. If a banner/image failed to load, set imagesOk=false and healthy=false.",
   PRACTICE:
     "This is a free practice-questions page. Check: do actual questions with answer options render? Is the layout intact? Is there any database/server error, or an empty/'no questions' state?",
   TIMED:
@@ -29,8 +30,9 @@ const PROMPTS: Record<string, string> = {
 
 const SYSTEM =
   "You are a meticulous QA reviewer for exam-prep websites. You inspect a screenshot of a page and return ONLY a JSON object (no prose, no markdown fences) matching this shape: " +
-  '{"healthy": boolean, "layoutOk": boolean, "ctaPresent": boolean, "ctaWorking": boolean, "contentRendered": boolean, "issues": string[], "confidence": number (0..1), "summary": string}. ' +
-  "Set ctaWorking based only on whether buttons look enabled/real (you cannot click). Be strict: blank pages, error text, missing content, or broken layout => healthy=false.";
+  '{"healthy": boolean, "layoutOk": boolean, "ctaPresent": boolean, "ctaWorking": boolean, "contentRendered": boolean, "imagesOk": boolean, "issues": string[], "confidence": number (0..1), "summary": string}. ' +
+  "Set ctaWorking based only on whether buttons look enabled/real (you cannot click). Set imagesOk=false if ANY image is broken or missing — a broken-image placeholder icon, an empty framed box, or stray alt text/caption where a banner should be. " +
+  "Be strict: blank pages, error text, missing content, broken layout, OR broken/missing images => healthy=false.";
 
 /**
  * Tier-2 visual review of a page screenshot.

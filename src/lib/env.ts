@@ -78,6 +78,10 @@ export const env = {
     httpTimeoutMs: num("HTTP_TIMEOUT_MS", 20000),
     auditSamplePct: num("AUDIT_SAMPLE_PCT", 10),
     screenshotDir: str("SCREENSHOT_DIR", "./data/screenshots"),
+    // Visually AI-review every landing page each weekly audit (CTA banners matter).
+    reviewAllLandings: str("AUDIT_REVIEW_ALL_LANDINGS", "true").toLowerCase() !== "false",
+    // HTTP-verify every <img> on landing pages loads (catches lost CTA banners).
+    checkImages: str("AUDIT_CHECK_IMAGES", "true").toLowerCase() !== "false",
   },
 
   publicApiBase: str("PUBLIC_API_BASE", "http://localhost:3000"),
