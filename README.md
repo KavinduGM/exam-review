@@ -79,6 +79,10 @@ curl https://monitor.yourdomain.com/api/exams/oapractice/D426
 
 These two endpoints are public (no auth); everything else requires the admin login.
 
+**Description API (for the YouTube generator):** `GET /api/description/{site}/{code}` returns the 4 entry links (study guide, practice, timed, contact) as JSON + a ready-to-paste block, keyed per channel. Protected by `DESCRIPTION_API_KEY` (`x-api-key` header, `Authorization: Bearer`, or `?key=`).
+
+A full machine-readable spec for all read endpoints is in [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1) — import it into your description generator instead of wiring the endpoint by hand.
+
 ## Local development
 
 ```bash

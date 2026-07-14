@@ -1,0 +1,354 @@
+openapi: 3.1.0
+info:
+  title: Web Site Auditor — Links API
+  version: "1.0.0"
+  description: >
+    Read API for the exam link registry. The `/api/description/{site}/{code}`
+    endpoint is the one the YouTube-description generator uses (API-key protected);
+    the `/api/exam*` endpoints are public read/search helpers. Links are collected
+    and health-monitored by the auditor; each exam belongs to one site (channel),
+    and OAP/OAG share exam codes but return their own site's links.
+
+servers:
+  - url: https://{host}
+    description: Your deployed auditor
+    variables:
+      host:
+        default: monitor.example.com
+        description: The domain you mapped to the auditor's web service in Dokploy.
+
+security: []
+
+paths:
+  /api/description/{site}/{code}:
+    get:
+      operationId: getDescriptionLinks
+      summary: Entry links + ready-to-paste block for one exam on one channel
+      description: >
+        Returns the 4 entry links (study guide, practice set 1 part 1, timed set 1,
+        contact) for one exam on one site/channel, plus a pre-formatted
+        `descriptionBlock`. Look up per channel: e.g. `oapractice/D216` and
+        `oaguides/D216` return each site's own links. API-key protected.
+      security:
+        - apiKeyHeader: []
+        - bearerAuth: []
+        - apiKeyQuery: []
+      parameters:
+        - $ref: "#/components/parameters/Site"
+        - $ref: "#/components/parameters/Code"
+      responses:
+        "200":
+          description: The exam's description links.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DescriptionResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503":
+          description: DESCRIPTION_API_KEY is not configured on the server.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/exam/{group}/{code}:
+    get:
+      operationId: getExamGroup
+      summary: Grouped links for one exam across a brand group (public)
+      description: >
+        All links for one exam across every site in the brand group (e.g. `oa` =
+        oapractice + oaguides), under one canonical name, with timed deduped.
+      parameters:
+        - name: group
+          in: path
+          required: true
+          schema: { type: string }
+          description: SiteGroup key (oa, nursing, state, …).
+          example: oa
+        - $ref: "#/components/parameters/Code"
+      responses:
+        "200":
+          description: Grouped exam links.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExamGroupResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/exam-groups:
+    get:
+      operationId: listExamGroups
+      summary: List brand groups, or one group's exams (public)
+      parameters:
+        - name: group
+          in: query
+          required: false
+          schema: { type: string }
+          description: If set, returns that group's exams (code + canonical name).
+          example: oa
+      responses:
+        "200":
+          description: Groups, or a group's exams.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/GroupList"
+                  - $ref: "#/components/schemas/GroupExams"
+
+  /api/exams:
+    get:
+      operationId: listExams
+      summary: List/search exams (public) — use to resolve a name to a code
+      parameters:
+        - name: site
+          in: query
+          schema: { type: string }
+          example: oapractice
+        - name: q
+          in: query
+          schema: { type: string }
+          description: Substring match on exam code or name.
+          example: business law
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, stale, error] }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 200, maximum: 1000 }
+      responses:
+        "200":
+          description: Matching exams.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExamList" }
+
+  /api/exams/{site}/{code}:
+    get:
+      operationId: getSiteExam
+      summary: All links for one exam on one site (public)
+      parameters:
+        - $ref: "#/components/parameters/Site"
+        - $ref: "#/components/parameters/Code"
+      responses:
+        "200":
+          description: The exam's full link set.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SiteExamResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/health:
+    get:
+      operationId: health
+      summary: Liveness + DB check (public)
+      responses:
+        "200":
+          description: Healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  db: { type: string }
+        "503":
+          description: Database unreachable.
+
+components:
+  securitySchemes:
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: x-api-key
+    apiKeyQuery:
+      type: apiKey
+      in: query
+      name: key
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  parameters:
+    Site:
+      name: site
+      in: path
+      required: true
+      description: Site/channel key.
+      schema:
+        type: string
+        enum: [oapractice, oaguides, nursingexamsupport, stateexamsprep]
+      example: stateexamsprep
+    Code:
+      name: code
+      in: path
+      required: true
+      description: Exam code / number (URL-encode spaces, e.g. "HESI%20E2").
+      schema: { type: string }
+      example: NYPCL
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid API key.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Exam or group not found.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+
+    LinkStatus:
+      type: [string, "null"]
+      enum: [up, down, degraded, null]
+      description: Latest monitored health of the link (null = not yet checked).
+
+    DescriptionLinks:
+      type: object
+      properties:
+        studyGuide: { type: [string, "null"], format: uri }
+        practiceQuestions: { type: [string, "null"], format: uri }
+        timedExams: { type: [string, "null"], format: uri }
+        contact: { type: [string, "null"], format: uri }
+
+    DescriptionResponse:
+      type: object
+      properties:
+        site: { type: string, example: stateexamsprep }
+        siteName: { type: string, example: State Exams Prep }
+        examCode: { type: string, example: NYPCL }
+        examName: { type: string, example: New York Property and Causality License Exam }
+        nameResolved:
+          type: boolean
+          description: True if the name came from the exam DB (else code placeholder).
+        links: { $ref: "#/components/schemas/DescriptionLinks" }
+        status:
+          type: object
+          properties:
+            studyGuide: { $ref: "#/components/schemas/LinkStatus" }
+            practiceQuestions: { $ref: "#/components/schemas/LinkStatus" }
+            timedExams: { $ref: "#/components/schemas/LinkStatus" }
+            contact: { $ref: "#/components/schemas/LinkStatus" }
+        allUp:
+          type: boolean
+          description: True if none of the entry links are currently down/degraded.
+        labels:
+          type: object
+          additionalProperties: { type: string }
+          description: The label prefix for each line (configurable server-side).
+        descriptionBlock:
+          type: string
+          description: Ready-to-paste text block with labels + URLs, blank-line separated.
+
+    PracticeLink:
+      type: object
+      properties:
+        set: { type: integer }
+        part: { type: integer }
+        subdomain: { type: string, enum: [questions, answers] }
+        url: { type: string, format: uri }
+        status: { $ref: "#/components/schemas/LinkStatus" }
+
+    TimedLink:
+      type: object
+      properties:
+        set: { type: integer }
+        url: { type: string, format: uri }
+        status: { $ref: "#/components/schemas/LinkStatus" }
+
+    ExamGroupResponse:
+      type: object
+      properties:
+        group: { type: string, example: oa }
+        examCode: { type: string, example: D216 }
+        name: { type: string, example: "WGU D216 - Business Law for Accountants" }
+        nameResolved: { type: boolean }
+        sites:
+          type: array
+          items:
+            type: object
+            properties:
+              site: { type: string }
+              siteName: { type: string }
+              studyGuide: { type: [string, "null"], format: uri }
+              contact: { type: [string, "null"], format: uri }
+              practice:
+                type: array
+                items: { $ref: "#/components/schemas/PracticeLink" }
+        timed:
+          type: array
+          items: { $ref: "#/components/schemas/TimedLink" }
+
+    GroupList:
+      type: object
+      properties:
+        groups:
+          type: array
+          items:
+            type: object
+            properties:
+              group: { type: string }
+              name: { type: string }
+              namePrefix: { type: string }
+              sites: { type: array, items: { type: string } }
+              exams: { type: integer }
+
+    GroupExams:
+      type: object
+      properties:
+        group: { type: string }
+        count: { type: integer }
+        apiHint: { type: string }
+        exams:
+          type: array
+          items:
+            type: object
+            properties:
+              examCode: { type: string }
+              name: { type: string }
+              nameResolved: { type: boolean }
+
+    ExamList:
+      type: object
+      properties:
+        count: { type: integer }
+        exams:
+          type: array
+          items:
+            type: object
+            properties:
+              site: { type: string }
+              examCode: { type: string }
+              examName: { type: string }
+              status: { type: string }
+              links: { type: integer }
+              apiUrl: { type: string }
+
+    SiteExamResponse:
+      type: object
+      properties:
+        site: { type: string }
+        siteName: { type: string }
+        examCode: { type: string }
+        examName: { type: string }
+        status: { type: string }
+        landing: { type: [string, "null"], format: uri }
+        contact: { type: [string, "null"], format: uri }
+        counts:
+          type: object
+          properties:
+            sets: { type: integer }
+            parts: { type: integer }
+            timedSets: { type: integer }
+        practice:
+          type: array
+          items: { $ref: "#/components/schemas/PracticeLink" }
+        timed:
+          type: array
+          items: { $ref: "#/components/schemas/TimedLink" }
+        lastSeenAt: { type: string, format: date-time }
