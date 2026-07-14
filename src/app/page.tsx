@@ -241,6 +241,12 @@ export default async function Dashboard() {
           <code>GET /api/exam/&#123;group&#125;/&#123;code&#125;</code> — grouped links for one exam ·{" "}
           <code>GET /api/exam-groups?group=oa</code> — list a group&apos;s exams. Public (no auth).
         </p>
+        <p className="muted">
+          <b>Description API (for your YouTube generator):</b>{" "}
+          <code>GET /api/description/&#123;site&#125;/&#123;code&#125;</code> — the 4 entry links (study guide,
+          practice, timed, contact) + a ready-to-paste block for one exam on one channel. Requires the{" "}
+          <code>DESCRIPTION_API_KEY</code> (send as <code>x-api-key</code> header or <code>?key=</code>).
+        </p>
       </div>
     </>
   );

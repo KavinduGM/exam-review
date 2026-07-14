@@ -85,4 +85,7 @@ export const env = {
   },
 
   publicApiBase: str("PUBLIC_API_BASE", "http://localhost:3000"),
+
+  // Secret key for the YouTube-description API (/api/description/*).
+  descriptionApiKey: str("DESCRIPTION_API_KEY"),
 };

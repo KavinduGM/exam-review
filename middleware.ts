@@ -3,7 +3,9 @@ import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth";
 
 // Public routes: the exams API (consumed by the YouTube-description system),
 // health check, login page, and auth endpoints. Everything else needs a session.
-const PUBLIC_PREFIXES = ["/login", "/api/auth", "/api/exam", "/api/health", "/_next", "/favicon"];
+// /api/description enforces its OWN API key inside the route, so it bypasses the
+// dashboard session gate here (listed public) rather than requiring a login cookie.
+const PUBLIC_PREFIXES = ["/login", "/api/auth", "/api/exam", "/api/description", "/api/health", "/_next", "/favicon"];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
