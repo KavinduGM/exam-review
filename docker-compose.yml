@@ -5,14 +5,20 @@
 # from that Environment. (Env is inlined per-service on purpose — ${VAR} inside a
 # shared YAML anchor does not interpolate reliably on Dokploy.)
 #
-# The internal Postgres password is a FIXED literal on both the db service and the
-# app DATABASE_URL so they can never diverge (Postgres here is internal-only).
+# The internal Postgres password is a FIXED literal on both the auditor-db service
+# and the app DATABASE_URL so they can never diverge (Postgres here is internal-only).
+#
+# Service names are prefixed "auditor-" ON PURPOSE: Dokploy attaches `web` to the
+# shared dokploy-network overlay (for Traefik), where another project's service
+# aliased plain `redis` shadowed ours — web enqueued jobs into the WRONG Redis
+# while the worker consumed the right one. Unique names make DNS unambiguous.
+# Do not rename these back to bare `db` / `redis`.
 #
 # The client source DBs are NOT defined here — the auditor connects to them
 # read-only over Dokploy's internal network via the SRC_* variables.
 
 services:
-  db:
+  auditor-db:
     image: postgres:16-alpine
     restart: unless-stopped
     mem_limit: 768m
@@ -28,7 +34,7 @@ services:
       timeout: 3s
       retries: 10
 
-  redis:
+  auditor-redis:
     image: redis:7-alpine
     restart: unless-stopped
     mem_limit: 256m
@@ -48,8 +54,8 @@ services:
     environment:
       PROCESS_ROLE: "web" # entrypoint: migrate schema, then run Next.js
       NODE_ENV: "production"
-      DATABASE_URL: "postgresql://auditor:auditor_internal_2026_pw@db:5432/auditor?schema=public"
-      REDIS_URL: "redis://redis:6379"
+      DATABASE_URL: "postgresql://auditor:auditor_internal_2026_pw@auditor-db:5432/auditor?schema=public"
+      REDIS_URL: "redis://auditor-redis:6379"
       TZ: "${TZ:-UTC}"
       SRC_TIMED_HOST: "${SRC_TIMED_HOST:-}"
       SRC_TIMED_PORT: "${SRC_TIMED_PORT:-3306}"
@@ -100,8 +106,8 @@ services:
       retries: 5
       start_period: 40s
     depends_on:
-      db: { condition: service_healthy }
-      redis: { condition: service_healthy }
+      auditor-db: { condition: service_healthy }
+      auditor-redis: { condition: service_healthy }
 
   worker:
     build: .
@@ -110,8 +116,8 @@ services:
     environment:
       PROCESS_ROLE: "worker" # entrypoint: run the BullMQ worker
       NODE_ENV: "production"
-      DATABASE_URL: "postgresql://auditor:auditor_internal_2026_pw@db:5432/auditor?schema=public"
-      REDIS_URL: "redis://redis:6379"
+      DATABASE_URL: "postgresql://auditor:auditor_internal_2026_pw@auditor-db:5432/auditor?schema=public"
+      REDIS_URL: "redis://auditor-redis:6379"
       TZ: "${TZ:-UTC}"
       SRC_TIMED_HOST: "${SRC_TIMED_HOST:-}"
       SRC_TIMED_PORT: "${SRC_TIMED_PORT:-3306}"
@@ -150,8 +156,8 @@ services:
     volumes:
       - auditor_data:/app/data
     depends_on:
-      db: { condition: service_healthy }
-      redis: { condition: service_healthy }
+      auditor-db: { condition: service_healthy }
+      auditor-redis: { condition: service_healthy }
       web: { condition: service_started }
 
 volumes:

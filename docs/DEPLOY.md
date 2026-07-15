@@ -94,6 +94,16 @@ data yet, so safe):
 ports in Dokploy; map a Domain to the `web` service's internal port 3000 instead.
 (The compose file already avoids publishing ports.)
 
+**Manual "Run now" jobs stay queued while scheduled jobs run fine.** Classic
+split-brain: Dokploy attaches `web` to the shared dokploy-network overlay for
+Traefik routing, and if any other project on that overlay aliases a service with
+a generic name (`redis`, `db`), the web container's DNS may resolve to *that*
+project's container — so web enqueues into one Redis while the worker consumes
+another. Diagnose with `docker exec <web> getent hosts <name>` vs
+`docker exec <worker> getent hosts <name>` (different IPs = split). That's why
+this compose names services `auditor-db` / `auditor-redis` — keep service names
+unique per project on shared Dokploy hosts.
+
 **Domain shows 404 but containers are up.** The `web` container is likely crash-
 looping (check its logs — usually the DB-auth issue above). Also confirm the Domain
 targets the `web` service on port 3000.
