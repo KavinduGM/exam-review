@@ -15,6 +15,7 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    mem_limit: 768m
     environment:
       POSTGRES_USER: auditor
       POSTGRES_PASSWORD: "auditor_internal_2026_pw" # must match DATABASE_URL below
@@ -30,6 +31,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    mem_limit: 256m
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - auditor_redis:/data
@@ -42,6 +44,7 @@ services:
   web:
     build: .
     restart: unless-stopped
+    mem_limit: 768m
     environment:
       PROCESS_ROLE: "web" # entrypoint: migrate schema, then run Next.js
       NODE_ENV: "production"
@@ -103,6 +106,7 @@ services:
   worker:
     build: .
     restart: unless-stopped
+    mem_limit: 1536m # cap Chromium/audit memory so it can't starve the co-hosted client sites
     environment:
       PROCESS_ROLE: "worker" # entrypoint: run the BullMQ worker
       NODE_ENV: "production"

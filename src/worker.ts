@@ -12,6 +12,7 @@ import { ensureGroups } from "@/lib/groups";
 import { collectAllSites } from "@/collector/collect";
 import { runUptimeSweep } from "@/monitor/run";
 import { runWeeklyAudit } from "@/audit/run";
+import { closeBrowser } from "@/audit/screenshot";
 
 async function main() {
   await ensureSitesSeeded();
@@ -55,6 +56,7 @@ async function main() {
   const shutdown = async () => {
     logger.info("shutting down worker");
     await worker.close();
+    await closeBrowser().catch(() => undefined); // free any lingering Chromium
     process.exit(0);
   };
   process.on("SIGTERM", shutdown);

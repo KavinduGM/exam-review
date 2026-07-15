@@ -118,6 +118,7 @@ export async function runWeeklyAudit(onProgress?: ProgressFn): Promise<AuditSumm
 
   let aiCostUsd = 0;
 
+  try {
   await mapLimit(tier2Targets, env.tuning.playwrightConcurrency, async (t) => {
     const shot = await capture(t.link.url, `link-${t.link.id}-run-${run.id}`);
     const review = shot.pngBase64
@@ -155,9 +156,10 @@ export async function runWeeklyAudit(onProgress?: ProgressFn): Promise<AuditSumm
     onProgress?.({ phase: "audit", stage: "ai-review", reviewed: t2done, total: tier2Targets.length, flagged: aiFlagged });
   });
 
-  logger.info({ aiReviewed, aiFlagged, aiCostUsd: aiCostUsd.toFixed(4) }, "weekly audit: AI review cost");
-
-  await closeBrowser();
+    logger.info({ aiReviewed, aiFlagged, aiCostUsd: aiCostUsd.toFixed(4) }, "weekly audit: AI review cost");
+  } finally {
+    await closeBrowser(); // always free Chromium, even if a screenshot/review threw
+  }
 
   // Practice-flow structural review: Set→Part sequence + end-of-flow home page.
   const flows = await reviewPracticeFlows(tier1.map((t) => ({ link: t.link, status: t.status })));

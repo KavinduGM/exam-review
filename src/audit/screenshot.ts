@@ -8,7 +8,19 @@ let browserPromise: Promise<Browser> | null = null;
 
 async function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
-    browserPromise = chromium.launch({ args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+    // Lean flags for a memory-constrained, shared box.
+    browserPromise = chromium.launch({
+      args: [
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-background-timer-throttling",
+        "--disable-renderer-backgrounding",
+        "--no-zygote",
+      ],
+    });
   }
   return browserPromise;
 }
