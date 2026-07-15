@@ -10,7 +10,10 @@ export const auditorQueue = new Queue(QUEUE_NAME, {
   defaultJobOptions: {
     removeOnComplete: { count: 200 },
     removeOnFail: { count: 200 },
-    attempts: 1,
+    // Retry a few times so a transient blip (DB briefly unreachable, Redis hiccup)
+    // doesn't fail the whole run. Our jobs are idempotent, so re-running is safe.
+    attempts: 3,
+    backoff: { type: "exponential", delay: 30_000 }, // 30s → 60s → 120s
   },
 });
 
