@@ -75,13 +75,17 @@ export async function checkLink(link: Link, exam: Exam, opts: { keepBody?: boole
   const httpOk = res.ok && res.status >= 200 && res.status < 400;
 
   if (!httpOk) {
+    // 429 = the MONITOR got rate-limited, not the page being down for users.
+    // Surface it as degraded (contentOk=false) with a clear message so it doesn't
+    // fire false "site down" alerts.
+    const rateLimited = res.status === 429;
     return {
       httpStatus: res.status,
       latencyMs: res.latencyMs,
       ok: false,
-      contentOk: null,
+      contentOk: rateLimited ? false : null,
       dataOk: null,
-      error: res.error ?? `HTTP ${res.status}`,
+      error: rateLimited ? "HTTP 429 (rate limited — monitor throttled, page likely fine for users)" : (res.error ?? `HTTP ${res.status}`),
     };
   }
 

@@ -41,6 +41,14 @@ function codeFromSlug(slug: string): string | null {
   return m ? m[1].toUpperCase() : null;
 }
 
+/** Detect a roman-numeral variant in a landing title, e.g. "WGU D471 OA Study
+ *  Guide II – 2025" -> "II". Some sites publish several articles for one course
+ *  code; without this they'd collapse onto one (site, code) row. */
+function romanVariantFromTitle(title: string): string | null {
+  const m = title.match(/\b(?:guide|part|vol(?:ume)?\.?)\s+(x?i{1,3}|x?iv|x?v|x?vi{1,3}|ix|x)\b/i);
+  return m ? m[1].toUpperCase() : null;
+}
+
 async function buildDbIndex(): Promise<DbIndex> {
   const [timedAll, practiceAll] = await Promise.all([loadTimedIndex(), loadPracticeIndex()]);
   const timedByBackLink = new Map<string, TimedIndexEntry>();
@@ -335,7 +343,11 @@ async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Prom
 
   const practiceInfo = practiceNew ?? practiceOld;
   const setsCount = practiceInfo?.setsCount && practiceInfo.setsCount > 0 ? practiceInfo.setsCount : site.defaultSets;
-  const examCode = code ?? timedSlug ?? new URL(ex.landingUrl).pathname.replace(/\W+/g, "-");
+
+  // Disambiguate multi-article courses ("Study Guide I/II/III" share one ec code):
+  // the stored examCode gets a -I/-II suffix; DB lookups above still use the bare code.
+  const variant = code ? romanVariantFromTitle(ex.title) : null;
+  const examCode = code ? (variant ? `${code}-${variant}` : code) : (timedSlug ?? new URL(ex.landingUrl).pathname.replace(/\W+/g, "-"));
 
   // Canonical name comes from the exam-manager (timed) DB. Exams not yet in it
   // keep a code placeholder and get a real name on a later (daily) crawl.
@@ -344,7 +356,9 @@ async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Prom
     timedInfo?.examName ??
     (code ? dbIndex.nameByCode.get(code.toUpperCase()) : undefined);
   const nameResolved = Boolean(dbName);
-  const examName = dbName || practiceInfo?.examName || ex.title || examCode;
+  // Multi-part articles (D471-I vs D471-II) must keep their own page titles —
+  // the shared DB name for the bare code would make them indistinguishable.
+  const examName = variant ? (ex.title || examCode) : (dbName || practiceInfo?.examName || ex.title || examCode);
 
   const notes: string[] = [];
   if (dbIndex.connected) {
@@ -353,6 +367,7 @@ async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Prom
     if (ex.timedSlug && !timedInfo) notes.push("timed slug not in DB");
     if (constructed.length) notes.push(`built from DB: ${constructed.join(", ")}`);
   }
+  if (variant) notes.push(`multi-part course: variant ${variant} (practice code ${code})`);
 
   const examId = await writeExam({
     site,

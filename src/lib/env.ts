@@ -73,6 +73,12 @@ export const env = {
   },
 
   tuning: {
+    // Hosts that aggressively rate-limit bursts (LiteSpeed shared hosting etc.):
+    // always fetched strictly serially with a gap. Comma-separated hostnames.
+    slowHosts: str("SLOW_HOSTS", "onlinedegreeblogs.com")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
     httpConcurrency: num("HTTP_CONCURRENCY", 8),
     playwrightConcurrency: num("PLAYWRIGHT_CONCURRENCY", 2),
     httpTimeoutMs: num("HTTP_TIMEOUT_MS", 20000),
