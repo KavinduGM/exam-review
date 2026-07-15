@@ -51,6 +51,12 @@ services:
     build: .
     restart: unless-stopped
     mem_limit: 768m
+    # default = our private network (auditor-db/auditor-redis); dokploy-network =
+    # the shared overlay, needed for Traefik routing and to reach the client
+    # MySQL services (SRC_* hosts) by their internal names.
+    networks:
+      - default
+      - dokploy-network
     environment:
       PROCESS_ROLE: "web" # entrypoint: migrate schema, then run Next.js
       NODE_ENV: "production"
@@ -114,6 +120,11 @@ services:
     build: .
     restart: unless-stopped
     mem_limit: 1536m # cap Chromium/audit memory so it can't starve the co-hosted client sites
+    # dokploy-network so the worker can resolve the client MySQL internal hosts
+    # (SRC_* env). Safe now that our own services are uniquely named auditor-*.
+    networks:
+      - default
+      - dokploy-network
     environment:
       PROCESS_ROLE: "worker" # entrypoint: run the BullMQ worker
       NODE_ENV: "production"
@@ -166,3 +177,9 @@ volumes:
   auditor_db:
   auditor_redis:
   auditor_data:
+
+networks:
+  # Dokploy's shared attachable overlay — where Traefik and the client DB
+  # services live. auditor-db/auditor-redis stay OFF it (private default net).
+  dokploy-network:
+    external: true
