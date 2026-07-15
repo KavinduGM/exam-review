@@ -22,6 +22,7 @@ interface Progress {
 interface Status {
   counts?: { active: number; waiting: number; delayed: number; completed: number; failed: number; paused: number } | null;
   workers?: number;
+  workerAlive?: boolean;
   activeJobs?: { name: string; progress: Progress | number | null; elapsedMs: number | null }[];
   waiting?: { name: string; ageMs: number | null }[];
   failed?: { name: string; reason: string; at: number | null }[];
@@ -87,11 +88,12 @@ export function Activity() {
 
   const c = s?.counts;
   const workers = s?.workers ?? 0;
+  const alive = s?.workerAlive ?? workers > 0;
   const active = s?.activeJobs?.[0];
   const waiting = c?.waiting ?? 0;
   const oldestWait = s?.waiting?.[0]?.ageMs ?? null;
   const failed = c?.failed ?? 0;
-  const workerDown = workers === 0 && (waiting > 0 || (c?.active ?? 0) > 0);
+  const workerDown = !alive && (waiting > 0 || (c?.active ?? 0) > 0);
 
   let label: string;
   let dotClass = "idle";
@@ -126,7 +128,7 @@ export function Activity() {
       </div>
       {s && (
         <div className="activity-meta muted">
-          <span>Worker: {workers > 0 ? <b style={{ color: "var(--up)" }}>connected</b> : <b style={{ color: "var(--down)" }}>none</b>}</span>
+          <span>Worker: {alive ? <b style={{ color: "var(--up)" }}>connected</b> : <b style={{ color: "var(--down)" }}>none</b>}</span>
           <span>active {c?.active ?? 0}</span>
           <span>waiting {waiting}{oldestWait != null && waiting > 0 ? ` (oldest ${fmt(oldestWait)})` : ""}</span>
           <span>completed {c?.completed ?? 0}</span>
