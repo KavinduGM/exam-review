@@ -15,6 +15,15 @@ export function RunButtons() {
     setTimeout(() => router.refresh(), 1500);
   }
 
+  async function clearQueue() {
+    if (!confirm("Clear all queued jobs and failures? (A currently-running job isn't affected.)")) return;
+    setMsg("Clearing queue…");
+    const res = await fetch("/api/queue/clear", { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    setMsg(res.ok ? `Cleared ${data.cleared} queued job(s)` : `Failed: ${data.error}`);
+    setTimeout(() => router.refresh(), 1000);
+  }
+
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
@@ -26,6 +35,7 @@ export function RunButtons() {
       <button onClick={() => run("collect")}>Collect links</button>
       <button onClick={() => run("uptime")}>Run uptime</button>
       <button onClick={() => run("audit")}>Run weekly audit</button>
+      <button className="secondary" onClick={clearQueue}>Clear queue</button>
       <button className="secondary" onClick={logout}>Log out</button>
       {msg && <span className="muted">{msg}</span>}
     </div>

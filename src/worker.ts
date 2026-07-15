@@ -36,7 +36,15 @@ async function main() {
           throw new Error(`unknown job: ${job.name}`);
       }
     },
-    { connection: redisConnection, concurrency: 1 }, // jobs run one at a time; internal fan-out is concurrency-limited
+    {
+      connection: redisConnection,
+      concurrency: 1, // jobs run one at a time; internal fan-out is concurrency-limited
+      // If this worker dies mid-job, another (or a restart) reclaims the stalled
+      // job promptly instead of it hanging forever.
+      lockDuration: 60_000,
+      stalledInterval: 60_000,
+      maxStalledCount: 1,
+    },
   );
 
   worker.on("completed", (job) => logger.info({ job: job.name, id: job.id }, "job completed"));
