@@ -20,6 +20,14 @@ export interface SweepSummary {
 /** Run an uptime sweep over every active link. */
 export async function runUptimeSweep(onProgress?: ProgressFn): Promise<SweepSummary> {
   const run = await prisma.checkRun.create({ data: { type: "UPTIME" } });
+
+  // Housekeeping: incidents whose link was deactivated (e.g. replaced by a
+  // variant-keyed link) would otherwise stay OPEN forever — close them.
+  await prisma.incident.updateMany({
+    where: { status: "OPEN", link: { active: false } },
+    data: { status: "RESOLVED", resolvedAt: new Date() },
+  });
+
   const links = await prisma.link.findMany({
     where: { active: true, exam: { status: { not: "stale" } } },
     include: { exam: { include: { site: true } } },
