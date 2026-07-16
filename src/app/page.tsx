@@ -74,6 +74,7 @@ export default async function Dashboard() {
       dbSeeded: number;
       timedExpected: number;
       timedCollected: number;
+      timedMissing?: { slug: string; examName: string }[];
       practiceValidated: number;
     }[];
   };
@@ -150,7 +151,26 @@ export default async function Dashboard() {
                         {s.timedExpected > 0 ? (
                           <>
                             {s.timedCollected}/{s.timedExpected}{" "}
-                            {gap > 0 ? <span className="badge down">{gap} missing</span> : <span className="badge up">complete</span>}
+                            {gap > 0 ? (
+                              <details style={{ display: "inline" }}>
+                                <summary style={{ display: "inline", cursor: "pointer" }}>
+                                  <span className="badge down">{gap} missing</span>
+                                </summary>
+                                <div className="muted" style={{ marginTop: 6, fontSize: "0.85em" }}>
+                                  In your exam DB but no landing/timed link found on the site:
+                                  <ul style={{ margin: "4px 0 0 0", paddingLeft: 18 }}>
+                                    {(s.timedMissing ?? []).map((m) => (
+                                      <li key={m.slug}>
+                                        {m.examName} <span className="muted">({m.slug})</span>
+                                      </li>
+                                    ))}
+                                    {(s.timedMissing ?? []).length === 0 && <li>re-collect to list them</li>}
+                                  </ul>
+                                </div>
+                              </details>
+                            ) : (
+                              <span className="badge up">complete</span>
+                            )}
                           </>
                         ) : s.timedCollected > 0 ? (
                           <>

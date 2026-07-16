@@ -104,6 +104,7 @@ export interface CollectSiteResult {
   dbSeeded: number;
   timedExpected: number;
   timedCollected: number;
+  timedMissing: { slug: string; examName: string }[]; // DB timed exams for this site with no collected landing/timed link
   practiceValidated: number;
   errors: string[];
 }
@@ -119,6 +120,7 @@ function emptyResult(site: Site, dbConnected: boolean): CollectSiteResult {
     dbSeeded: 0,
     timedExpected: 0,
     timedCollected: 0,
+    timedMissing: [],
     practiceValidated: 0,
     errors: [],
   };
@@ -186,7 +188,23 @@ async function collectExamSite(site: Site, dbIndex: DbIndex): Promise<CollectSit
   }
 
   await markStale(site, [...seenExamIds]);
-  log.info(result, "exam site collection complete");
+
+  // Authoritative coverage: which of the DB's timed exams for this site actually
+  // ended up with a live timed link? Recompute from stored state so the count and
+  // the named list can't drift apart.
+  if (timedForSite.length > 0) {
+    const collected = await prisma.exam.findMany({
+      where: { siteId: site.id, status: { not: "stale" }, timedSlug: { not: null }, links: { some: { type: "TIMED", active: true } } },
+      select: { timedSlug: true },
+    });
+    const collectedSlugs = new Set(collected.map((e) => e.timedSlug!.toLowerCase()));
+    result.timedMissing = timedForSite
+      .filter((t) => !collectedSlugs.has(t.slug.toLowerCase()))
+      .map((t) => ({ slug: t.slug, examName: t.examName || t.slug }));
+    result.timedCollected = result.timedExpected - result.timedMissing.length;
+  }
+
+  log.info({ ...result, timedMissing: result.timedMissing.length }, "exam site collection complete");
   return result;
 }
 
