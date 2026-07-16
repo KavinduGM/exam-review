@@ -5,12 +5,18 @@ export interface ExtractedExam {
   landingUrl: string;
   title: string;
   examCode: string | null;
-  practiceUrl: string | null; // the real href on the page (set=1&part=1)
+  practiceUrl: string | null; // the real href on the page
+  practiceFormat: PracticeFormat | null; // how to enumerate set/part from practiceUrl
   practiceSource: "NEW" | "OLD" | "NONE";
   timedUrl: string | null; // .../exam_sets/{slug}/set-1
   timedSlug: string | null;
   contactUrl: string | null;
 }
+
+// Two practice-link shapes exist across the sites:
+//   query: …/practice-questions/C/?ec=CODE&set=1&part=1   (newer exams)
+//   path:  …/classes/{code}/set1-part1.html               (older static pages)
+export type PracticeFormat = "query" | "path";
 
 /**
  * Parse a landing page and pull out the real practice / timed / contact links.
@@ -33,7 +39,14 @@ export function extractExamFromLanding(landingUrl: string, html: string): Extrac
     }
   });
 
-  const practiceUrl = hrefs.find((h) => /\/practice-questions\//i.test(h)) ?? null;
+  // Practice link may be the query format (…/practice-questions/…?ec=) or the
+  // older path format (…/classes/{code}/set1-part1.html). Prefer query when both
+  // appear; fall back to path.
+  const practiceQueryUrl = hrefs.find((h) => /\/practice-questions\//i.test(h)) ?? null;
+  const practicePathUrl = hrefs.find((h) => /\/classes\/[^/]+\/set\d+-part\d+/i.test(h)) ?? null;
+  const practiceUrl = practiceQueryUrl ?? practicePathUrl;
+  const practiceFormat: PracticeFormat | null = practiceQueryUrl ? "query" : practicePathUrl ? "path" : null;
+
   const timedUrl =
     hrefs.find((h) => h.includes(TIMED_HOST) && /\/exam_sets\//i.test(h)) ?? null;
   const contactUrl = hrefs.find((h) => /\/contact\/?($|\?|#)/i.test(h)) ?? null;
@@ -46,7 +59,9 @@ export function extractExamFromLanding(landingUrl: string, html: string): Extrac
   if (practiceUrl) {
     try {
       const u = new URL(practiceUrl);
-      examCode = u.searchParams.get("ec");
+      // query format carries ?ec=CODE; path format carries the code as the
+      // /classes/{code}/ segment.
+      examCode = u.searchParams.get("ec") ?? (u.pathname.match(/\/classes\/([^/]+)\//i)?.[1]?.toUpperCase() ?? null);
       // answers.* = OLD DB, questions.* (and everything else) = NEW DB.
       practiceSource = /(^|\.)answers\./i.test(u.hostname) ? "OLD" : "NEW";
     } catch {
@@ -65,6 +80,7 @@ export function extractExamFromLanding(landingUrl: string, html: string): Extrac
     title,
     examCode: examCode ? examCode.trim() : null,
     practiceUrl,
+    practiceFormat,
     practiceSource,
     timedUrl,
     timedSlug,

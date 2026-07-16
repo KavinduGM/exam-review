@@ -1,4 +1,5 @@
 import type { LinkType } from "@prisma/client";
+import type { PracticeFormat } from "./extract";
 
 export interface GeneratedLink {
   type: LinkType;
@@ -11,7 +12,8 @@ export interface GeneratedLink {
 /** One practice subdomain's base URL + its set/part structure. */
 export interface PracticeBase {
   variant: string; // "questions" | "answers"
-  baseUrl: string; // …/practice-questions/C/?ec=CODE&set=1&part=1
+  baseUrl: string; // query: …/practice-questions/C/?ec=CODE&set=1&part=1  ·  path: …/classes/{code}/set1-part1.html
+  format: PracticeFormat; // how set/part is encoded in the URL
   sets: number;
   parts: number;
 }
@@ -41,7 +43,7 @@ export function enumerateLinks(input: EnumerateInput): GeneratedLink[] {
           setNo: set,
           part,
           variant: p.variant,
-          url: withQuery(p.baseUrl, { set: String(set), part: String(part) }),
+          url: p.format === "path" ? withPathSetPart(p.baseUrl, set, part) : withQuery(p.baseUrl, { set: String(set), part: String(part) }),
         });
       }
     }
@@ -72,4 +74,9 @@ function withQuery(url: string, params: Record<string, string>): string {
 
 function withTimedSet(url: string, set: number): string {
   return url.replace(/\/set-\d+(\/?$)/i, `/set-${set}$1`);
+}
+
+/** …/classes/{code}/set1-part1.html -> set{N}-part{P}.html */
+function withPathSetPart(url: string, set: number, part: number): string {
+  return url.replace(/set\d+-part\d+/i, `set${set}-part${part}`);
 }

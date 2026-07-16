@@ -4,7 +4,7 @@ import { logger } from "@/lib/logger";
 import { fetchUrl, mapLimit } from "@/lib/http";
 import { env } from "@/lib/env";
 import { discoverCandidateUrls, discoverAllPages } from "./discover";
-import { extractExamFromLanding, type ExtractedExam } from "./extract";
+import { extractExamFromLanding, type ExtractedExam, type PracticeFormat } from "./extract";
 import { enumerateLinks, type GeneratedLink, type PracticeBase, type EnumerateInput } from "./enumerate";
 import { constructPracticeUrl, constructTimedUrl, timedSetUrl, normalizeUrl, hostOf } from "./construct";
 import { loadTimedIndex, loadPracticeIndex, type TimedIndexEntry, type PracticeIndexEntry } from "@/sources";
@@ -321,26 +321,27 @@ async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Prom
   const partsCount = site.defaultParts;
   const practices: PracticeBase[] = [];
   const seenVar = new Set<string>();
-  const addPractice = (variant: string, baseUrl: string | null, sets: number | undefined) => {
+  const addPractice = (variant: string, baseUrl: string | null, format: PracticeFormat, sets: number | undefined) => {
     if (!baseUrl || seenVar.has(variant)) return;
-    practices.push({ variant, baseUrl, sets: sets && sets > 0 ? sets : site.defaultSets, parts: partsCount });
+    practices.push({ variant, baseUrl, format, sets: sets && sets > 0 ? sets : site.defaultSets, parts: partsCount });
     seenVar.add(variant);
   };
 
   // 1) The real link the landing page exposed (exact format, right subdomain).
-  if (ex.practiceUrl) {
+  //    Some exams use the older /classes/{code}/setN-partM.html path format.
+  if (ex.practiceUrl && ex.practiceFormat) {
     const v = ex.practiceSource === "OLD" ? "answers" : "questions";
-    addPractice(v, ex.practiceUrl, (v === "answers" ? practiceOld : practiceNew)?.setsCount);
+    addPractice(v, ex.practiceUrl, ex.practiceFormat, (v === "answers" ? practiceOld : practiceNew)?.setsCount);
   }
   // 2) questions. — valid whenever the code is in exam_db (shared, so always served).
   if (code && practiceNew && !seenVar.has("questions")) {
-    addPractice("questions", constructPracticeUrl(site.baseUrl, "NEW", code), practiceNew.setsCount);
+    addPractice("questions", constructPracticeUrl(site.baseUrl, "NEW", code), "query", practiceNew.setsCount);
   }
   // 3) answers. — only when the code is in answers_db AND this site actually has
   //    an answers. subdomain (probe the constructed URL to confirm).
   if (code && practiceOld && !seenVar.has("answers")) {
     const u = constructPracticeUrl(site.baseUrl, "OLD", code);
-    if (u && (await practiceUrlWorks(u))) addPractice("answers", u, practiceOld.setsCount);
+    if (u && (await practiceUrlWorks(u))) addPractice("answers", u, "query", practiceOld.setsCount);
   }
 
   let timedUrl = ex.timedUrl;
@@ -422,11 +423,13 @@ async function seedExamFromTimed(site: Site, t: TimedIndexEntry, dbIndex: DbInde
   }
   const code = deriveCode(landingUrl, t.slug, dbIndex.practiceByCode);
   const practice = code ? dbIndex.practiceByCode.get(code) : undefined;
+  const practiceUrl = code && practice ? constructPracticeUrl(site.baseUrl, practice.source, code) : null;
   const synthetic: ExtractedExam = {
     landingUrl,
     title: t.examName,
     examCode: code,
-    practiceUrl: code && practice ? constructPracticeUrl(site.baseUrl, practice.source, code) : null,
+    practiceUrl,
+    practiceFormat: practiceUrl ? "query" : null, // constructPracticeUrl builds the query format
     practiceSource: practice?.source ?? "NONE",
     timedUrl: constructTimedUrl(t.slug),
     timedSlug: t.slug,
