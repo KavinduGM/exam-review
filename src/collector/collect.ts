@@ -544,6 +544,41 @@ async function markStale(site: Site, seenIds: number[]): Promise<void> {
   }
 }
 
+export interface PurgeResult {
+  deleted: number;
+  kept: { id: number; examCode: string; examName: string; site: string; reason: string }[];
+}
+
+/**
+ * Delete stale exams that have been SUPERSEDED — i.e. an active exam on the same
+ * site shares the same landing page (the clean-code row that replaced the old
+ * slug-coded one). Stale exams WITHOUT an active replacement are kept and
+ * reported, so a real exam can never be silently dropped. Links/incidents cascade.
+ */
+export async function purgeStaleExams(): Promise<PurgeResult> {
+  const stale = await prisma.exam.findMany({ where: { status: "stale" }, include: { site: true } });
+  const active = await prisma.exam.findMany({ where: { status: { not: "stale" } }, select: { siteId: true, examCode: true, landingUrl: true } });
+
+  // Index active exams by site → normalized landing, and site → clean code.
+  const activeLanding = new Set(active.map((e) => `${e.siteId}|${normalizeUrl(e.landingUrl)}`));
+  const activeCode = new Set(active.map((e) => `${e.siteId}|${e.examCode.toUpperCase()}`));
+
+  const toDelete: number[] = [];
+  const kept: PurgeResult["kept"] = [];
+  for (const e of stale) {
+    const cleanCode = codeFromSlug(e.examCode) ?? codeFromLanding(e.landingUrl);
+    const hasReplacement =
+      activeLanding.has(`${e.siteId}|${normalizeUrl(e.landingUrl)}`) ||
+      (cleanCode ? activeCode.has(`${e.siteId}|${cleanCode.toUpperCase()}`) : false);
+    if (hasReplacement) toDelete.push(e.id);
+    else kept.push({ id: e.id, examCode: e.examCode, examName: e.examName, site: e.site.key, reason: "no active replacement — review before removing" });
+  }
+
+  if (toDelete.length > 0) await prisma.exam.deleteMany({ where: { id: { in: toDelete } } });
+  logger.info({ deleted: toDelete.length, kept: kept.length }, "purge stale exams");
+  return { deleted: toDelete.length, kept };
+}
+
 function pageCode(url: string): string {
   try {
     const p = new URL(url).pathname.replace(/\/+$/, "");
