@@ -92,6 +92,14 @@ export const env = {
 
   publicApiBase: str("PUBLIC_API_BASE", "http://localhost:3000"),
 
-  // Secret key for the YouTube-description API (/api/description/*).
+  // Secret key for the YouTube-description API (/api/description/*, /api/reports).
   descriptionApiKey: str("DESCRIPTION_API_KEY"),
+
+  // Broken-link report loop with the description system.
+  reports: {
+    // Webhook we POST to when a reported link recovers (per-report callbackUrl overrides).
+    webhookUrl: str("DESCRIPTION_WEBHOOK_URL"),
+    webhookKey: str("DESCRIPTION_WEBHOOK_KEY"), // sent as x-api-key on the webhook
+    escalationHours: num("REPORT_ESCALATION_HOURS", 24), // email admin if still down after this
+  },
 };

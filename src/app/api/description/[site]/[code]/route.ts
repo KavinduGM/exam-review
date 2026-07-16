@@ -1,21 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { env } from "@/lib/env";
+import { descriptionKeyOk as keyOk } from "@/lib/apikey";
 import { DESCRIPTION_LABELS, buildDescriptionBlock, type DescriptionLinks } from "@/config/description";
 
 export const dynamic = "force-dynamic";
-
-// Accept the key via x-api-key, Authorization: Bearer, or ?key=.
-function keyOk(req: Request): boolean {
-  if (!env.descriptionApiKey) return false;
-  const url = new URL(req.url);
-  const provided =
-    req.headers.get("x-api-key") ||
-    req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ||
-    url.searchParams.get("key") ||
-    "";
-  return provided === env.descriptionApiKey;
-}
 
 // GET /api/description/{site}/{code}
 // The YouTube-description links for one exam on one channel/site. API-key protected.

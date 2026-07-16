@@ -6,6 +6,7 @@ import { mapLimit } from "@/lib/http";
 import { checkLink } from "./check";
 import { reconcileIncident } from "./incidents";
 import { sendDownAlert, sendRecoveryAlert, type DownItem } from "@/notify/resend";
+import { processOpenReports } from "./reports";
 import type { ProgressFn } from "@/lib/progress";
 
 export interface SweepSummary {
@@ -93,6 +94,10 @@ export async function runUptimeSweep(onProgress?: ProgressFn): Promise<SweepSumm
   // Alert only on transitions, so we don't re-notify every sweep.
   await sendDownAlert(opened);
   await sendRecoveryAlert(resolved);
+
+  // Re-check links reported broken by the description system (recovery webhook /
+  // escalation email live in here).
+  await processOpenReports().catch((err) => logger.error({ err }, "processOpenReports failed"));
 
   logger.info(summary, "uptime sweep complete");
   return summary;

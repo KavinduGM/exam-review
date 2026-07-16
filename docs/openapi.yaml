@@ -136,6 +136,115 @@ paths:
               schema: { $ref: "#/components/schemas/SiteExamResponse" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/reports:
+    post:
+      operationId: reportBrokenLink
+      summary: Report a link the description system believes is broken
+      description: >
+        The link is re-checked LIVE immediately. If it's actually up, the response
+        says so and nothing is tracked. If it's down/degraded, a report is opened:
+        the auditor re-checks it every sweep (~10 min), POSTs the `linkRecovered`
+        webhook when it comes back, and emails the admin if it stays down past the
+        escalation deadline (default 24h).
+      security:
+        - apiKeyHeader: []
+        - bearerAuth: []
+        - apiKeyQuery: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri, description: The exact link that failed. }
+                site: { type: string, description: Optional site key hint. }
+                examCode: { type: string, description: Optional exam code hint. }
+                context:
+                  description: Anything useful to echo back on the webhook (videoId, descriptionId…).
+                callbackUrl:
+                  type: string
+                  format: uri
+                  description: Per-report webhook override (else the server-configured DESCRIPTION_WEBHOOK_URL is used).
+      responses:
+        "200":
+          description: Link is actually up — safe to attach, nothing tracked.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tracked: { type: boolean, const: false }
+                  known: { type: boolean }
+                  status: { type: string, const: up }
+                  httpStatus: { type: integer }
+                  checkedAt: { type: string, format: date-time }
+        "202":
+          description: Confirmed broken — report opened and being watched.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tracked: { type: boolean, const: true }
+                  reportId: { type: integer }
+                  known: { type: boolean, description: Whether the URL is in the link registry. }
+                  site: { type: [string, "null"] }
+                  examCode: { type: [string, "null"] }
+                  status: { type: string, enum: [down, degraded] }
+                  httpStatus: { type: [integer, "null"] }
+                  error: { type: [string, "null"] }
+                  recovery: { type: string }
+                  escalation: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    get:
+      operationId: listReports
+      summary: List recent broken-link reports
+      security:
+        - apiKeyHeader: []
+        - bearerAuth: []
+        - apiKeyQuery: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [OPEN, RECOVERED, ESCALATED] }
+      responses:
+        "200":
+          description: Recent reports.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+                  reports:
+                    type: array
+                    items: { $ref: "#/components/schemas/Report" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/reports/{id}:
+    get:
+      operationId: getReport
+      summary: Poll one report's status (alternative to the webhook)
+      security:
+        - apiKeyHeader: []
+        - bearerAuth: []
+        - apiKeyQuery: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Report status. `safeToAttach` is true once RECOVERED.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Report" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/health:
     get:
       operationId: health
@@ -152,6 +261,33 @@ paths:
                   db: { type: string }
         "503":
           description: Database unreachable.
+
+webhooks:
+  linkRecovered:
+    post:
+      summary: Fired when a reported link comes back online
+      description: >
+        POSTed to the per-report `callbackUrl` (or the server-configured
+        DESCRIPTION_WEBHOOK_URL) with header `x-api-key: <DESCRIPTION_WEBHOOK_KEY>`
+        when set. Respond 2xx to acknowledge; non-2xx deliveries are retried on
+        the next sweep (~10 min).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event: { type: string, const: link.recovered }
+                reportId: { type: integer }
+                url: { type: string, format: uri }
+                site: { type: [string, "null"] }
+                examCode: { type: [string, "null"] }
+                examName: { type: [string, "null"] }
+                context: { description: Echoed from the original report. }
+                reportedAt: { type: string, format: date-time }
+                recoveredAt: { type: string, format: date-time }
+      responses:
+        "200": { description: Acknowledged. }
 
 components:
   securitySchemes:
@@ -202,6 +338,22 @@ components:
       type: object
       properties:
         error: { type: string }
+
+    Report:
+      type: object
+      properties:
+        reportId: { type: integer }
+        url: { type: string, format: uri }
+        status: { type: string, enum: [OPEN, RECOVERED, ESCALATED] }
+        safeToAttach: { type: boolean }
+        site: { type: [string, "null"] }
+        examCode: { type: [string, "null"] }
+        linkCurrentStatus: { $ref: "#/components/schemas/LinkStatus" }
+        reportedAt: { type: string, format: date-time }
+        lastCheckedAt: { type: [string, "null"], format: date-time }
+        recoveredAt: { type: [string, "null"], format: date-time }
+        escalatedAt: { type: [string, "null"], format: date-time }
+        lastError: { type: [string, "null"] }
 
     LinkStatus:
       type: [string, "null"]

@@ -47,6 +47,13 @@ export default async function Dashboard() {
 
   const groups = await prisma.siteGroup.findMany({ include: { sites: { select: { key: true } } }, orderBy: { key: "asc" } });
 
+  const linkReports = await prisma.linkReport.findMany({
+    where: { status: { in: ["OPEN", "ESCALATED"] } },
+    orderBy: { reportedAt: "desc" },
+    take: 20,
+    include: { link: { include: { exam: { include: { site: true } } } } },
+  });
+
   // AI review cost accounting (from stored per-review token usage).
   const now = Date.now();
   const since = (days: number) => new Date(now - days * 86400_000);
@@ -207,6 +214,30 @@ export default async function Dashboard() {
             ))}
           </tbody>
         </table>
+
+        {linkReports.length > 0 && (
+          <>
+            <h2>Reported by description system ({linkReports.length})</h2>
+            <p className="muted">
+              Links the YouTube-description generator flagged as broken. We re-check them every sweep; a recovery
+              webhook fires when they come back, and you get an email if one stays down past the deadline.
+            </p>
+            <table>
+              <thead><tr><th>Exam</th><th>URL</th><th>Status</th><th>Reported</th><th>Last error</th></tr></thead>
+              <tbody>
+                {linkReports.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.link ? `${r.link.exam.site.name} · ${r.link.exam.examCode}` : <span className="muted">unregistered</span>}</td>
+                    <td><a href={r.url} target="_blank" rel="noreferrer">{r.url.length > 60 ? r.url.slice(0, 60) + "…" : r.url}</a></td>
+                    <td><span className={`badge ${r.status === "ESCALATED" ? "down" : "degraded"}`}>{r.status.toLowerCase()}</span></td>
+                    <td className="muted">{r.reportedAt.toISOString().slice(0, 16).replace("T", " ")}</td>
+                    <td className="muted">{r.lastError ?? ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
 
         <h2>Recent runs</h2>
         <table>

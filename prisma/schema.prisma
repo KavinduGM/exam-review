@@ -41,6 +41,12 @@ enum IncidentStatus {
   RESOLVED
 }
 
+enum ReportStatus {
+  OPEN // reported broken, still down, watching for recovery
+  RECOVERED // came back up (recovery callback delivered if configured)
+  ESCALATED // still down past the deadline — admin emailed; still watched
+}
+
 /// A brand group. Sites in the same group share exams (by code+name) and their
 /// links are aggregated under one exam for export. Most groups hold a single site;
 /// OA (oapractice + oaguides) holds two.
@@ -149,6 +155,7 @@ model Link {
 
   results   CheckResult[]
   incidents Incident[]
+  reports   LinkReport[]
 
   @@unique([examId, type, setNo, part, variant])
   @@index([type])
@@ -196,6 +203,31 @@ model CheckResult {
 
   @@index([linkId, checkedAt])
   @@index([runId])
+}
+
+/// A broken-link report filed by an external system (the YouTube-description
+/// generator). Re-checked every sweep; webhook fired on recovery; admin emailed
+/// if still down past the escalation deadline.
+model LinkReport {
+  id     Int   @id @default(autoincrement())
+  link   Link? @relation(fields: [linkId], references: [id], onDelete: SetNull)
+  linkId Int? // null = URL not in our registry (checked ad-hoc)
+
+  url         String
+  source      String  @default("description-system")
+  context     Json? // whatever the reporter attaches (video id, description id…)
+  callbackUrl String? // per-report webhook override
+
+  status         ReportStatus @default(OPEN)
+  reportedAt     DateTime     @default(now())
+  lastCheckedAt  DateTime?
+  recoveredAt    DateTime?
+  escalatedAt    DateTime?
+  callbackSentAt DateTime?
+  lastError      String?
+
+  @@index([status])
+  @@index([url])
 }
 
 /// An open problem with a link. Opened on first failure, resolved when it recovers.

@@ -60,6 +60,34 @@ export async function sendRecoveryAlert(items: DownItem[]): Promise<void> {
   );
 }
 
+export interface EscalationItem {
+  url: string;
+  site: string;
+  exam: string;
+  reportedAt: Date;
+  hoursDown: number;
+  error: string;
+}
+
+/** Links reported by the description system that are STILL down past the deadline. */
+export async function sendReportEscalation(items: EscalationItem[]): Promise<void> {
+  if (items.length === 0) return;
+  const rows = items
+    .map(
+      (i) =>
+        `<tr><td>${esc(i.site)}</td><td>${esc(i.exam)}</td><td><a href="${esc(i.url)}">link</a></td><td>${i.hoursDown}h</td><td>${esc(i.error)}</td></tr>`,
+    )
+    .join("");
+  await send(
+    `⚠️ ${items.length} reported link(s) still down — action needed`,
+    `<h2>The description system reported these links broken, and they are STILL down after the deadline</h2>
+     <p>Descriptions are waiting on these links. Investigate the underlying pages:</p>
+     <table border="1" cellpadding="6" cellspacing="0">
+       <tr><th>Site</th><th>Exam</th><th>URL</th><th>Down for</th><th>Last error</th></tr>${rows}
+     </table>`,
+  );
+}
+
 /** Weekly digest summarizing the audit run. */
 export async function sendWeeklyDigest(html: string, totals: { checked: number; down: number; degraded: number }): Promise<void> {
   await send(
