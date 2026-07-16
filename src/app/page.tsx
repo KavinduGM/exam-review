@@ -140,8 +140,18 @@ export default async function Dashboard() {
                       <td>{s.examsFound}</td>
                       <td>{s.dbSeeded > 0 ? s.dbSeeded : <span className="muted">—</span>}</td>
                       <td>
-                        {s.timedCollected}/{s.timedExpected}{" "}
-                        {gap > 0 ? <span className="badge down">{gap} missing</span> : s.timedExpected > 0 ? <span className="badge up">complete</span> : <span className="muted">—</span>}
+                        {s.timedExpected > 0 ? (
+                          <>
+                            {s.timedCollected}/{s.timedExpected}{" "}
+                            {gap > 0 ? <span className="badge down">{gap} missing</span> : <span className="badge up">complete</span>}
+                          </>
+                        ) : s.timedCollected > 0 ? (
+                          <>
+                            {s.timedCollected} <span className="muted">(shared — DB back_links point to a sister site)</span>
+                          </>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
                       </td>
                       <td>{s.practiceValidated}{coverage.dbConnected ? "" : <span className="muted"> (n/a)</span>}</td>
                     </tr>

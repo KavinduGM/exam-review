@@ -75,6 +75,16 @@ async function findIndexPages(baseUrl: string, host: string): Promise<string[]> 
  * Gather candidate landing-page URLs for a site using all available strategies.
  * The collector then fetches each and keeps only real exam landing pages.
  */
+/** Dedupe key: URLs differing only by www./trailing-slash/fragment are one page. */
+function pageKey(u: string): string {
+  try {
+    const x = new URL(u);
+    return `${x.hostname.replace(/^www\./i, "").toLowerCase()}${x.pathname.replace(/\/+$/, "")}${x.search}`;
+  } catch {
+    return u;
+  }
+}
+
 export async function discoverCandidateUrls(site: Site): Promise<string[]> {
   const host = mainHost(site.baseUrl);
   const candidates = new Set<string>();
@@ -100,7 +110,11 @@ export async function discoverCandidateUrls(site: Site): Promise<string[]> {
   backLinks.forEach((u) => candidates.add(u));
   if (backLinks.length) logger.info({ site: site.key, count: backLinks.length }, "discovery: timed back_links");
 
-  return [...candidates];
+  // Dedupe URL variants (www., trailing slash, fragments) — they'd be fetched
+  // and counted as separate pages otherwise.
+  const byKey = new Map<string, string>();
+  for (const u of candidates) if (!byKey.has(pageKey(u))) byKey.set(pageKey(u), u);
+  return [...byKey.values()];
 }
 
 const ASSET_RE = /\.(jpg|jpeg|png|gif|webp|svg|css|js|pdf|xml|ico|woff2?|ttf|zip|mp4)(\?|$)/i;

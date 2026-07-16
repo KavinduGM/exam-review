@@ -131,8 +131,18 @@ async function collectExamSite(site: Site, dbIndex: DbIndex): Promise<CollectSit
   result.urlsScanned = urls.length;
   log.info({ count: urls.length }, "candidate URLs discovered");
 
-  const seenExamIds: number[] = [];
+  // Count UNIQUE exams — duplicate URL variants of one landing page must not
+  // inflate the run summary (they upsert the same exam row).
+  const seenExamIds = new Set<number>();
   const seenLandings = new Set<string>();
+  const tally = (r: UpsertResult) => {
+    if (seenExamIds.has(r.examId)) return;
+    seenExamIds.add(r.examId);
+    result.examsFound++;
+    result.linksUpserted += r.linkCount;
+    if (r.timedVerified) result.timedCollected++;
+    if (r.practiceVerified) result.practiceValidated++;
+  };
 
   await mapLimit(urls, env.tuning.httpConcurrency, async (url) => {
     const res = await fetchUrl(url);
@@ -141,12 +151,8 @@ async function collectExamSite(site: Site, dbIndex: DbIndex): Promise<CollectSit
     if (!extracted) return;
     try {
       const r = await upsertExam(site, extracted, dbIndex);
-      seenExamIds.push(r.examId);
+      tally(r);
       seenLandings.add(normalizeUrl(url));
-      result.examsFound++;
-      result.linksUpserted += r.linkCount;
-      if (r.timedVerified) result.timedCollected++;
-      if (r.practiceVerified) result.practiceValidated++;
     } catch (err) {
       result.errors.push(`${url}: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -160,19 +166,15 @@ async function collectExamSite(site: Site, dbIndex: DbIndex): Promise<CollectSit
     if (!t.backLink || seenLandings.has(normalizeUrl(t.backLink))) continue;
     try {
       const r = await seedExamFromTimed(site, t, dbIndex);
-      seenExamIds.push(r.examId);
+      if (!seenExamIds.has(r.examId)) result.dbSeeded++;
+      tally(r);
       seenLandings.add(normalizeUrl(t.backLink));
-      result.examsFound++;
-      result.dbSeeded++;
-      result.linksUpserted += r.linkCount;
-      if (r.timedVerified) result.timedCollected++;
-      if (r.practiceVerified) result.practiceValidated++;
     } catch (err) {
       result.errors.push(`seed ${t.backLink}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  await markStale(site, seenExamIds);
+  await markStale(site, [...seenExamIds]);
   log.info(result, "exam site collection complete");
   return result;
 }
