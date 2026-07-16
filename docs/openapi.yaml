@@ -136,6 +136,48 @@ paths:
               schema: { $ref: "#/components/schemas/SiteExamResponse" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/resolve/{key}:
+    get:
+      operationId: resolveExamKey
+      summary: Resolve a channel-coded exam key to its canonical name + links
+      description: >
+        The automation system's primary lookup. Send a channel-coded key like
+        `OAP_SG_D310` or `NURSING_QA_TEAS`. We parse the channel (OAP/OAG/NURSING/
+        STATE) and exam code (the middle SG/QA content-type token is ignored),
+        then resolve the canonical exam NAME — fuzzy-matching vendor prefixes and
+        name variants (`ATI TEAS` -> `TEAS`), separators (`NY-PCL` -> `NYPCL`),
+        and multi-part variants (`C213` -> ambiguous C213-I / C213-II). Returns a
+        `confidence` and, when unsure, `candidates` so the caller can flag it for
+        review instead of using a wrong name.
+      security:
+        - apiKeyHeader: []
+        - bearerAuth: []
+        - apiKeyQuery: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+          example: OAP_SG_D310
+      responses:
+        "200":
+          description: Resolved (confidence exact or strong).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResolveResult" }
+        "409":
+          description: Ambiguous — multiple exams matched similarly; see candidates.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResolveResult" }
+        "404":
+          description: No exam matched the code in that channel.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResolveResult" }
+        "400": { description: Unknown channel or missing exam code. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /api/reports:
     post:
       operationId: reportBrokenLink
@@ -338,6 +380,48 @@ components:
       type: object
       properties:
         error: { type: string }
+
+    ResolveResult:
+      type: object
+      properties:
+        input: { type: string, example: OAP_SG_D310 }
+        channel: { type: string, example: OAP }
+        site: { type: [string, "null"], example: oapractice }
+        contentType: { type: [string, "null"], example: SG }
+        requestedCode: { type: string, example: D310 }
+        confidence: { type: string, enum: [exact, strong, ambiguous, none] }
+        matchedVia: { type: string }
+        resolved: { type: boolean }
+        examCode: { type: string, description: Canonical stored code (present when resolved). }
+        examName: { type: string, description: Canonical exam name (present when resolved). }
+        nameResolved: { type: boolean, description: True = name came from the exam-manager DB (authoritative). }
+        links:
+          type: object
+          properties:
+            studyGuide: { type: [string, "null"] }
+            practiceQuestions: { type: [string, "null"] }
+            timedExams: { type: [string, "null"] }
+            contact: { type: [string, "null"] }
+        candidates:
+          type: array
+          description: Present when unresolved/ambiguous — ranked alternatives to review.
+          items:
+            type: object
+            properties:
+              examCode: { type: string }
+              examName: { type: string }
+              site: { type: string }
+              score: { type: number }
+        alternativeCandidates:
+          type: array
+          description: Other exams that also scored (empty when the match was unambiguous).
+          items:
+            type: object
+            properties:
+              examCode: { type: string }
+              examName: { type: string }
+              site: { type: string }
+              score: { type: number }
 
     Report:
       type: object
