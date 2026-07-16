@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { exactCodeWhere, fuzzyCodeWhere } from "@/lib/examLookup";
 
 export const dynamic = "force-dynamic";
 
@@ -10,10 +11,13 @@ export async function GET(_req: Request, ctx: { params: Promise<{ site: string; 
   const { site, code } = await ctx.params;
   const examCode = decodeURIComponent(code);
 
-  const exam = await prisma.exam.findFirst({
-    where: { examCode, site: { key: site } },
-    include: { site: true, links: { where: { active: true }, orderBy: [{ type: "asc" }, { variant: "asc" }, { setNo: "asc" }, { part: "asc" }] } },
-  });
+  const include = {
+    site: true,
+    links: { where: { active: true }, orderBy: [{ type: "asc" as const }, { variant: "asc" as const }, { setNo: "asc" as const }, { part: "asc" as const }] },
+  };
+  const exam =
+    (await prisma.exam.findFirst({ where: { ...exactCodeWhere(examCode), site: { key: site } }, include })) ??
+    (await prisma.exam.findFirst({ where: { ...fuzzyCodeWhere(examCode), site: { key: site } }, include }));
 
   if (!exam) {
     return NextResponse.json({ error: "exam not found", site, code: examCode }, { status: 404 });

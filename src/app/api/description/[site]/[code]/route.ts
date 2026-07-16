@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { env } from "@/lib/env";
 import { descriptionKeyOk as keyOk } from "@/lib/apikey";
+import { exactCodeWhere, fuzzyCodeWhere } from "@/lib/examLookup";
 import { DESCRIPTION_LABELS, buildDescriptionBlock, type DescriptionLinks } from "@/config/description";
 
 export const dynamic = "force-dynamic";
@@ -20,13 +21,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ site: string; c
   const { site, code } = await ctx.params;
   const examCode = decodeURIComponent(code);
 
-  const exam = await prisma.exam.findFirst({
-    where: { examCode, site: { key: site } },
-    include: {
-      site: true,
-      links: { where: { active: true }, select: { type: true, url: true, lastStatus: true } },
-    },
-  });
+  const include = {
+    site: true,
+    links: { where: { active: true }, select: { type: true, url: true, lastStatus: true } },
+  } as const;
+  const exam =
+    (await prisma.exam.findFirst({ where: { ...exactCodeWhere(examCode), site: { key: site } }, include })) ??
+    (await prisma.exam.findFirst({ where: { ...fuzzyCodeWhere(examCode), site: { key: site } }, include }));
   if (!exam) {
     return NextResponse.json({ error: "exam not found", site, code: examCode }, { status: 404 });
   }

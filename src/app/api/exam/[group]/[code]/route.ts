@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { exactCodeWhere, fuzzyCodeWhere } from "@/lib/examLookup";
 
 export const dynamic = "force-dynamic";
 
@@ -13,14 +14,23 @@ export async function GET(_req: Request, ctx: { params: Promise<{ group: string;
   const grp = await prisma.siteGroup.findUnique({ where: { key: group } });
   if (!grp) return NextResponse.json({ error: "group not found", group }, { status: 404 });
 
-  const exams = await prisma.exam.findMany({
-    where: { examCode, site: { groupId: grp.id } },
-    include: {
-      site: true,
-      links: { where: { active: true }, orderBy: [{ type: "asc" }, { variant: "asc" }, { setNo: "asc" }, { part: "asc" }] },
-    },
+  const include = {
+    site: true,
+    links: { where: { active: true }, orderBy: [{ type: "asc" as const }, { variant: "asc" as const }, { setNo: "asc" as const }, { part: "asc" as const }] },
+  };
+  let exams = await prisma.exam.findMany({
+    where: { ...exactCodeWhere(examCode), site: { groupId: grp.id } },
+    include,
     orderBy: { siteId: "asc" },
   });
+  if (exams.length === 0) {
+    // Fallback: historical rows keyed by a long timed slug (…-c720).
+    exams = await prisma.exam.findMany({
+      where: { ...fuzzyCodeWhere(examCode), site: { groupId: grp.id } },
+      include,
+      orderBy: { siteId: "asc" },
+    });
+  }
   if (exams.length === 0) return NextResponse.json({ error: "exam not found", group, code: examCode }, { status: 404 });
 
   const named = exams.find((e) => e.nameResolved);

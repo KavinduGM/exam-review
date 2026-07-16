@@ -41,6 +41,17 @@ function codeFromSlug(slug: string): string | null {
   return m ? m[1].toUpperCase() : null;
 }
 
+/** Pull a course code from a landing path like /c720 or /exams/D426 -> "C720". */
+function codeFromLanding(landingUrl: string): string | null {
+  try {
+    const seg = decodeURIComponent(new URL(landingUrl).pathname.split("/").filter(Boolean).pop() ?? "");
+    const m = seg.match(/^([a-z]{1,5}\d{2,4}[a-z]?)$/i); // must be a compact letters+digits token
+    return m ? m[1].toUpperCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Detect a roman-numeral variant in a landing title, e.g. "WGU D471 OA Study
  *  Guide II – 2025" -> "II". Some sites publish several articles for one course
  *  code; without this they'd collapse onto one (site, code) row. */
@@ -346,10 +357,18 @@ async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Prom
   const practiceInfo = practiceNew ?? practiceOld;
   const setsCount = practiceInfo?.setsCount && practiceInfo.setsCount > 0 ? practiceInfo.setsCount : site.defaultSets;
 
+  // Prefer a clean course code even when the page has no practice link (?ec=):
+  // timed-only exams (e.g. C720) used to fall back to the long timed slug as
+  // their code, breaking lookups like /api/exam/oa/C720. Derive from the landing
+  // path (/c720) or the slug tail (…-c720) before resorting to the raw slug.
+  const cleanCode = code ?? codeFromLanding(ex.landingUrl) ?? (timedSlug ? codeFromSlug(timedSlug) : null);
+
   // Disambiguate multi-article courses ("Study Guide I/II/III" share one ec code):
   // the stored examCode gets a -I/-II suffix; DB lookups above still use the bare code.
-  const variant = code ? romanVariantFromTitle(ex.title) : null;
-  const examCode = code ? (variant ? `${code}-${variant}` : code) : (timedSlug ?? new URL(ex.landingUrl).pathname.replace(/\W+/g, "-"));
+  const variant = cleanCode ? romanVariantFromTitle(ex.title) : null;
+  const examCode = cleanCode
+    ? (variant ? `${cleanCode}-${variant}` : cleanCode)
+    : (timedSlug ?? new URL(ex.landingUrl).pathname.replace(/\W+/g, "-"));
 
   // Canonical name comes from the exam-manager (timed) DB. Exams not yet in it
   // keep a code placeholder and get a real name on a later (daily) crawl.
