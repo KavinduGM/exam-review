@@ -26,6 +26,7 @@ interface DbIndex {
   timedAll: TimedIndexEntry[];
   timedByBackLink: Map<string, TimedIndexEntry>;
   timedBySlug: Map<string, TimedIndexEntry>;
+  timedByCode: Map<string, TimedIndexEntry>; // UPPER code -> entry (slug-format-proof)
   practiceAll: PracticeIndexEntry[];
   practiceByCode: Map<string, PracticeIndexEntry>; // merged (NEW wins) — for code derivation
   practiceNewByCode: Map<string, PracticeIndexEntry>; // questions.  (exam_db)
@@ -39,6 +40,22 @@ interface DbIndex {
 function codeFromSlug(slug: string): string | null {
   const m = slug.match(/-([a-z]\d{2,4})(?:$|-)/i) ?? slug.match(/^([a-z]\d{2,4})$/i);
   return m ? m[1].toUpperCase() : null;
+}
+
+/**
+ * Robustly pull the course code from a timed slug regardless of where it sits —
+ * the exam-manager DB stores it inconsistently: "…-c458" (end), "c458-…" (start),
+ * "…---c458" (triple dash). Both slug variants of the same exam still yield the
+ * same code, so we match timed exams by code, not by exact slug string.
+ */
+function timedCode(slug: string): string | null {
+  const m = slug.match(/(?:^|-)([a-z]\d{2,4})(?:-|$)/i);
+  return m ? m[1].toUpperCase() : null;
+}
+
+/** The clean code of a stored exam ("C458", "D471-I" -> "D471"). */
+function baseCode(examCode: string): string {
+  return examCode.split("-")[0].toUpperCase();
 }
 
 /** Pull a course code from a landing path like /c720 or /exams/D426 -> "C720". */
@@ -64,9 +81,12 @@ async function buildDbIndex(): Promise<DbIndex> {
   const [timedAll, practiceAll] = await Promise.all([loadTimedIndex(), loadPracticeIndex()]);
   const timedByBackLink = new Map<string, TimedIndexEntry>();
   const timedBySlug = new Map<string, TimedIndexEntry>();
+  const timedByCode = new Map<string, TimedIndexEntry>();
   for (const t of timedAll) {
     if (t.backLink) timedByBackLink.set(normalizeUrl(t.backLink), t);
     if (t.slug) timedBySlug.set(t.slug, t);
+    const c = timedCode(t.slug);
+    if (c && !timedByCode.has(c)) timedByCode.set(c, t);
   }
   const practiceNewByCode = new Map<string, PracticeIndexEntry>();
   const practiceOldByCode = new Map<string, PracticeIndexEntry>();
@@ -77,13 +97,13 @@ async function buildDbIndex(): Promise<DbIndex> {
   const nameByCode = new Map<string, string>();
   for (const t of timedAll) {
     if (t.backLink && t.examName) nameByLanding.set(normalizeUrl(t.backLink), t.examName);
-    const c = codeFromSlug(t.slug);
+    const c = timedCode(t.slug); // robust: handles code at front/back/---
     if (c && t.examName) nameByCode.set(c, t.examName);
   }
 
   const connected = timedAll.length > 0 || practiceAll.length > 0;
   logger.info({ timed: timedAll.length, practiceNew: practiceNewByCode.size, practiceOld: practiceOldByCode.size, connected }, "DB index built");
-  return { connected, timedAll, timedByBackLink, timedBySlug, practiceAll, practiceByCode, practiceNewByCode, practiceOldByCode, nameByLanding, nameByCode };
+  return { connected, timedAll, timedByBackLink, timedBySlug, timedByCode, practiceAll, practiceByCode, practiceNewByCode, practiceOldByCode, nameByLanding, nameByCode };
 }
 
 /** Confirm a constructed practice URL actually serves the exam (guards the 2nd
@@ -190,16 +210,25 @@ async function collectExamSite(site: Site, dbIndex: DbIndex): Promise<CollectSit
   await markStale(site, [...seenExamIds]);
 
   // Authoritative coverage: which of the DB's timed exams for this site actually
-  // ended up with a live timed link? Recompute from stored state so the count and
-  // the named list can't drift apart.
+  // ended up with a live timed link? Match by CODE, not slug — the DB slug format
+  // ("c458-…") often differs from the real onlineexamtest URL ("…---c458"), so a
+  // slug-string compare produced false "missing" for exams that ARE collected.
   if (timedForSite.length > 0) {
     const collected = await prisma.exam.findMany({
-      where: { siteId: site.id, status: { not: "stale" }, timedSlug: { not: null }, links: { some: { type: "TIMED", active: true } } },
-      select: { timedSlug: true },
+      where: { siteId: site.id, status: { not: "stale" }, links: { some: { type: "TIMED", active: true } } },
+      select: { examCode: true, timedSlug: true },
     });
-    const collectedSlugs = new Set(collected.map((e) => e.timedSlug!.toLowerCase()));
+    const collectedCodes = new Set<string>();
+    for (const e of collected) {
+      collectedCodes.add(baseCode(e.examCode));
+      const c = e.timedSlug ? timedCode(e.timedSlug) : null;
+      if (c) collectedCodes.add(c);
+    }
     result.timedMissing = timedForSite
-      .filter((t) => !collectedSlugs.has(t.slug.toLowerCase()))
+      .filter((t) => {
+        const c = timedCode(t.slug);
+        return !c || !collectedCodes.has(c);
+      })
       .map((t) => ({ slug: t.slug, examName: t.examName || t.slug }));
     result.timedCollected = result.timedExpected - result.timedMissing.length;
   }
@@ -333,8 +362,14 @@ async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Prom
   const code = ex.examCode;
   const practiceNew = code ? dbIndex.practiceNewByCode.get(code) : undefined; // questions.
   const practiceOld = code ? dbIndex.practiceOldByCode.get(code) : undefined; // answers.
+  // Match the timed DB entry by exact slug, then back_link, then CODE — the DB's
+  // slug format often differs from the real onlineexamtest URL (c458-… vs
+  // …---c458), so code matching is the reliable fallback.
   const timedInfo =
-    (ex.timedSlug ? dbIndex.timedBySlug.get(ex.timedSlug) : undefined) ?? dbIndex.timedByBackLink.get(normalizeUrl(ex.landingUrl));
+    (ex.timedSlug ? dbIndex.timedBySlug.get(ex.timedSlug) : undefined) ??
+    dbIndex.timedByBackLink.get(normalizeUrl(ex.landingUrl)) ??
+    (ex.timedSlug ? dbIndex.timedByCode.get(timedCode(ex.timedSlug) ?? "") : undefined) ??
+    (code ? dbIndex.timedByCode.get(code.toUpperCase()) : undefined);
 
   const partsCount = site.defaultParts;
   const practices: PracticeBase[] = [];
