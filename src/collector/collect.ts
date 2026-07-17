@@ -210,26 +210,32 @@ async function collectExamSite(site: Site, dbIndex: DbIndex): Promise<CollectSit
   await markStale(site, [...seenExamIds]);
 
   // Authoritative coverage: which of the DB's timed exams for this site actually
-  // ended up with a live timed link? Match by CODE, not slug — the DB slug format
-  // ("c458-…") often differs from the real onlineexamtest URL ("…---c458"), so a
-  // slug-string compare produced false "missing" for exams that ARE collected.
+  // ended up with a live timed link? Match on MULTIPLE format-independent signals
+  // so neither slug-format drift (c458-… vs …---c458) nor non-WGU codes (TEAS,
+  // NYPCL — no digits) produce false "missing":
+  //   1. landing page (DB back_link == collected exam's landingUrl) — primary,
+  //   2. exact timed slug,
+  //   3. WGU-style code (letter+digits) as a bonus.
   if (timedForSite.length > 0) {
     const collected = await prisma.exam.findMany({
       where: { siteId: site.id, status: { not: "stale" }, links: { some: { type: "TIMED", active: true } } },
-      select: { examCode: true, timedSlug: true },
+      select: { examCode: true, timedSlug: true, landingUrl: true },
     });
+    const collectedLandings = new Set(collected.map((e) => normalizeUrl(e.landingUrl)));
+    const collectedSlugs = new Set(collected.map((e) => (e.timedSlug ?? "").toLowerCase()).filter(Boolean));
     const collectedCodes = new Set<string>();
     for (const e of collected) {
       collectedCodes.add(baseCode(e.examCode));
       const c = e.timedSlug ? timedCode(e.timedSlug) : null;
       if (c) collectedCodes.add(c);
     }
-    result.timedMissing = timedForSite
-      .filter((t) => {
-        const c = timedCode(t.slug);
-        return !c || !collectedCodes.has(c);
-      })
-      .map((t) => ({ slug: t.slug, examName: t.examName || t.slug }));
+    const isCollected = (t: (typeof timedForSite)[number]) => {
+      if (t.backLink && collectedLandings.has(normalizeUrl(t.backLink))) return true;
+      if (collectedSlugs.has(t.slug.toLowerCase())) return true;
+      const c = timedCode(t.slug);
+      return Boolean(c && collectedCodes.has(c));
+    };
+    result.timedMissing = timedForSite.filter((t) => !isCollected(t)).map((t) => ({ slug: t.slug, examName: t.examName || t.slug }));
     result.timedCollected = result.timedExpected - result.timedMissing.length;
   }
 
