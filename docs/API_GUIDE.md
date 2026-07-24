@@ -39,6 +39,8 @@ Prefer the `x-api-key` header. `401 unauthorized` = missing/wrong key.
 | `POST /api/reports`, `GET /api/reports[/{id}]` | 🔒 key required |
 | `GET /api/exam/{group}/{code}` | 🌐 public |
 | `GET /api/exams/{site}/{code}` | 🌐 public |
+| `GET /api/qr/{site}/{code}` | 🌐 public |
+| `GET /api/landings/{channel}` | 🌐 public |
 | `GET /api/health` | 🌐 public |
 
 ---
@@ -210,7 +212,72 @@ single channel. Groups: `oa`, `nursing`, `state`.
 
 ---
 
-## 5. Broken-link feedback loop
+## 5. QR codes for landing pages
+
+Generate a QR code for any exam's landing page — served by the monitor, no
+third-party service. Both endpoints are public.
+
+### `GET /api/qr/{site}/{code}` 🌐
+
+Returns the QR **image** (PNG by default) encoding the exam's landing URL.
+
+| Query | Default | Notes |
+|---|---|---|
+| `format` | `png` | `png` or `svg` (SVG scales cleanly for print) |
+| `size` | `512` | pixel width, clamped 128–2048 |
+| `download` | — | `1` forces a file download (`{site}-{code}-qr.png`) |
+
+Embed it directly:
+
+```html
+<img src="https://monitor.groovymark.com/api/qr/oapractice/D310" alt="D310 QR" />
+```
+
+Or fetch a print-ready SVG / downloadable file:
+
+```
+https://monitor.groovymark.com/api/qr/nursingexamsupport/TEAS?format=svg
+https://monitor.groovymark.com/api/qr/oapractice/D310?download=1&size=1024
+```
+
+`{site}` is the site key (`oapractice`, `oaguides`, `nursingexamsupport`,
+`stateexamsprep`); `{code}` is the exam code and tolerates legacy slug codes.
+
+### `GET /api/landings/{channel}` 🌐
+
+The source list for a QR-generator UI — every active exam for a channel with its
+landing URL and a ready `qrUrl`.
+
+```bash
+curl "https://monitor.groovymark.com/api/landings/OAP"
+```
+
+```json
+{
+  "channel": "OAP",
+  "site": "oapractice",
+  "count": 157,
+  "exams": [
+    {
+      "channel": "OAP",
+      "examCode": "D310",
+      "examName": "Leadership and Management in Nursing",
+      "nameResolved": true,
+      "landingUrl": "https://oapractice.com/d310",
+      "landingStatus": "up",
+      "qrUrl": "https://monitor.groovymark.com/api/qr/oapractice/D310"
+    }
+  ]
+}
+```
+
+`?status=up` filters to exams whose landing is currently healthy — handy so you
+never print a QR that points at a down page. Append `?format=svg` / `?download=1`
+to any `qrUrl`.
+
+---
+
+## 6. Broken-link feedback loop
 
 When your reviewer thinks a link is broken, don't guess — report it. We re-check
 it **live**, watch it, and tell you when it recovers.
@@ -267,7 +334,7 @@ non-2xx is retried next sweep.
 
 ---
 
-## 6. Recommended automation flow
+## 7. Recommended automation flow
 
 ```
 For each (channel, examCode) the automation processes:
@@ -285,7 +352,7 @@ For each (channel, examCode) the automation processes:
 
 ---
 
-## 7. Reference
+## 8. Reference
 
 ### Endpoint summary
 
@@ -295,6 +362,8 @@ For each (channel, examCode) the automation processes:
 | GET | `/api/description/{site}/{code}` | 🔒 | Ready-to-paste description block + link status |
 | GET | `/api/exam/{group}/{code}` | 🌐 | Grouped export (OAP+OAG), one canonical name |
 | GET | `/api/exams/{site}/{code}` | 🌐 | All links for one exam on one site (raw) |
+| GET | `/api/qr/{site}/{code}` | 🌐 | QR image of a landing URL (png/svg) |
+| GET | `/api/landings/{channel}` | 🌐 | All exams for a channel + landing URL + qrUrl |
 | POST | `/api/reports` | 🔒 | Report a broken link (live re-check) |
 | GET | `/api/reports/{id}` | 🔒 | Poll a report's status |
 | GET | `/api/reports?status=` | 🔒 | List reports |

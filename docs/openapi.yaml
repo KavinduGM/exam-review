@@ -178,6 +178,58 @@ paths:
         "400": { description: Unknown channel or missing exam code. }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /api/qr/{site}/{code}:
+    get:
+      operationId: examQrCode
+      summary: QR code image for an exam's landing page
+      description: Returns a QR image (PNG by default, SVG optional) encoding the exam's landing URL. Public; deterministic; long-cached.
+      parameters:
+        - { name: site, in: path, required: true, schema: { type: string }, example: oapractice }
+        - { name: code, in: path, required: true, schema: { type: string }, example: D310 }
+        - { name: format, in: query, schema: { type: string, enum: [png, svg], default: png } }
+        - { name: size, in: query, schema: { type: integer, default: 512, minimum: 128, maximum: 2048 } }
+        - { name: download, in: query, schema: { type: string, enum: ["1"] }, description: Force a file download. }
+      responses:
+        "200":
+          description: QR image.
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/svg+xml: { schema: { type: string } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/landings/{channel}:
+    get:
+      operationId: listLandings
+      summary: All exams for a channel with landing URL + QR URL
+      description: Source list for a QR-generator UI. Public.
+      parameters:
+        - { name: channel, in: path, required: true, schema: { type: string, enum: [OAP, OAG, NURSING, STATE] } }
+        - { name: status, in: query, schema: { type: string, enum: [up, degraded, down] }, description: Filter by the landing link's last status. }
+      responses:
+        "200":
+          description: Exams with landing + qrUrl.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  channel: { type: string }
+                  site: { type: string }
+                  count: { type: integer }
+                  exams:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        channel: { type: string }
+                        examCode: { type: string }
+                        examName: { type: string }
+                        nameResolved: { type: boolean }
+                        landingUrl: { type: string, format: uri }
+                        landingStatus: { $ref: "#/components/schemas/LinkStatus" }
+                        qrUrl: { type: string, format: uri }
+        "400": { description: Unknown channel. }
+
   /api/reports:
     post:
       operationId: reportBrokenLink
