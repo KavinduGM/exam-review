@@ -16,7 +16,7 @@ available at [`openapi.yaml`](./openapi.yaml).
 
 | | |
 |---|---|
-| **Base URL** | `https://<your-monitor-domain>` (the Dokploy domain for this app) |
+| **Base URL** | `https://monitor.groovymark.com` (the Dokploy domain for this app) |
 | **Auth** | A single shared secret, the `DESCRIPTION_API_KEY` |
 
 Send the key on protected endpoints in **any** of these ways:
@@ -82,7 +82,7 @@ Turn a channel-coded key into a **canonical exam name + number + links**, with a
 
 ```bash
 curl -H "x-api-key: $KEY" \
-  "https://<domain>/api/resolve/OAP_SG_D310"
+  "https://monitor.groovymark.com/api/resolve/OAP_SG_D310"
 ```
 
 **200 — resolved**
@@ -167,7 +167,7 @@ Once you have a confident exam, get the ready-to-paste description block:
 
 ```bash
 curl -H "x-api-key: $KEY" \
-  "https://<domain>/api/description/oapractice/D310"
+  "https://monitor.groovymark.com/api/description/oapractice/D310"
 ```
 
 ```json
@@ -219,7 +219,7 @@ it **live**, watch it, and tell you when it recovers.
 
 ```bash
 curl -X POST -H "x-api-key: $KEY" -H "content-type: application/json" \
-  "https://<domain>/api/reports" \
+  "https://monitor.groovymark.com/api/reports" \
   -d '{
         "url": "https://questions.oapractice.com/classes/d310/set2-part1.html",
         "context": { "videoId": "abc123", "descriptionId": 987 },
