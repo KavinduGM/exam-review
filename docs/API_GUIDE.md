@@ -265,15 +265,24 @@ curl "https://monitor.groovymark.com/api/landings/OAP"
       "nameResolved": true,
       "landingUrl": "https://oapractice.com/d310",
       "landingStatus": "up",
-      "qrUrl": "https://monitor.groovymark.com/api/qr/oapractice/D310"
+      "qrUrl": "https://monitor.groovymark.com/api/qr/oapractice/D310",
+      "qrFilename": "QR_D310_oaP.png"
     }
   ]
 }
 ```
 
-`?status=up` filters to exams whose landing is currently healthy — handy so you
-never print a QR that points at a down page. Append `?format=svg` / `?download=1`
-to any `qrUrl`.
+- `?status=up` filters to exams whose landing is currently healthy — handy so you
+  never print a QR that points at a down page. Append `?format=svg` / `?download=1`
+  to any `qrUrl`.
+- `qrFilename` is the agreed save name for that exam's QR: OAP/OAG use the code
+  (`QR_D310_oaP.png`), Nursing/State use the exam name
+  (`QR_HESI_Fundamentals_of_Nursing_Nursing.png`).
+
+**Built-in export page.** The dashboard also has a **QR codes** page (`/qr`,
+behind login) that does all this for you: pick a destination folder per channel
+and it writes every QR straight into it (Chrome/Edge), or downloads a ZIP per
+channel (other browsers) — using the same `qrFilename` names.
 
 ---
 

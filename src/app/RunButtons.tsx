@@ -50,6 +50,7 @@ export function RunButtons() {
       <button onClick={() => run("audit")}>Run weekly audit</button>
       <button className="secondary" onClick={clearQueue}>Clear queue</button>
       <button className="secondary" onClick={purgeStale}>Purge stale exams</button>
+      <a href="/qr" className="btn secondary">QR codes</a>
       <button className="secondary" onClick={logout}>Log out</button>
       {msg && <span className="muted">{msg}</span>}
     </div>

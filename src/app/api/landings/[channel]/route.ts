@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { CHANNEL_TO_SITE } from "@/config/channels";
+import { CHANNEL_TO_SITE, qrFilenameBase } from "@/config/channels";
 import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +42,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ channel: string
       landingUrl: e.landingUrl,
       landingStatus: e.links[0]?.lastStatus ?? null,
       qrUrl: `${base}/api/qr/${site}/${encodeURIComponent(e.examCode)}`, // append ?format=svg / ?download=1
+      qrFilename: `${qrFilenameBase(channel.toUpperCase(), e.examCode, e.examName)}.png`,
     }))
     .filter((r) => (statusFilter ? r.landingStatus === statusFilter : true));
 

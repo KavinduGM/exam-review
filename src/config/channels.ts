@@ -11,6 +11,27 @@ export const CHANNEL_TO_SITE: Record<string, string> = {
 // The middle token is the content type; it's not needed to resolve the exam.
 const CONTENT_TYPES = new Set(["SG", "QA"]);
 
+// Suffix used in QR filenames per channel.
+const CHANNEL_QR_TAG: Record<string, string> = { OAP: "oaP", OAG: "oaG", NURSING: "Nursing", STATE: "State" };
+
+/** Filename-safe token: runs of non-alphanumerics collapse to one "_". */
+function sanitizeForFilename(s: string): string {
+  return s.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+/**
+ * QR image filename for an exam, per the agreed convention:
+ *   OAP/OAG      -> QR_{UPPERCODE}_oaP  / _oaG      (code-based)
+ *   NURSING/STATE -> QR_{Exam_Name}_Nursing / _State (name-based)
+ * Returns the base name WITHOUT extension.
+ */
+export function qrFilenameBase(channel: string, examCode: string, examName: string): string {
+  const ch = channel.toUpperCase();
+  const tag = CHANNEL_QR_TAG[ch] ?? ch;
+  const ident = ch === "OAP" || ch === "OAG" ? examCode.toUpperCase() : sanitizeForFilename(examName);
+  return `QR_${ident}_${tag}`;
+}
+
 export interface ParsedKey {
   channel: string; // "OAP"
   site: string | null; // "oapractice" (null if channel unknown)
