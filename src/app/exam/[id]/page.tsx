@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { ExamNameEditor } from "@/app/ExamNameEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -71,7 +72,9 @@ export default async function ExamPage({ params }: { params: Promise<{ id: strin
       </header>
 
       <div className="wrap">
-        <h2 style={{ marginBottom: 4 }}>{exam.examName}</h2>
+        <h2 style={{ marginBottom: 4 }}>
+          <ExamNameEditor examId={exam.id} collectedName={exam.examName} displayName={exam.displayName} />
+        </h2>
         <p className="muted" style={{ marginTop: 0 }}>
           {exam.examCode} · {exam.site.name} · {links.length} links{exam.notes ? ` · ${exam.notes}` : ""}
         </p>

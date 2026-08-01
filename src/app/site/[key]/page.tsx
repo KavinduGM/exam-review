@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { ExamNameEditor } from "@/app/ExamNameEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,7 @@ export default async function SitePage({
   if (!site) notFound();
 
   const [exams, links, incidents] = await Promise.all([
-    prisma.exam.findMany({ where: { siteId: site.id }, select: { id: true, examCode: true, examName: true, status: true } }),
+    prisma.exam.findMany({ where: { siteId: site.id }, select: { id: true, examCode: true, examName: true, displayName: true, status: true } }),
     prisma.link.findMany({ where: { active: true, exam: { siteId: site.id } }, select: { examId: true, lastStatus: true } }),
     prisma.incident.findMany({ where: { status: "OPEN", exam: { siteId: site.id } }, select: { examId: true } }),
   ]);
@@ -80,7 +81,10 @@ export default async function SitePage({
               {shown.map((e) => (
                 <tr key={e.id}>
                   <td><Link href={`/exam/${e.id}`}>{e.examCode}</Link></td>
-                  <td>{e.examName}{e.status === "stale" && <span className="badge unknown"> stale</span>}</td>
+                  <td>
+                    <ExamNameEditor examId={e.id} collectedName={e.examName} displayName={e.displayName} />
+                    {e.status === "stale" && <span className="badge unknown"> stale</span>}
+                  </td>
                   <td>{e.down > 0 ? <span className="badge down">{e.down}</span> : <span className="muted">0</span>}</td>
                   <td>{e.degraded > 0 ? <span className="badge degraded">{e.degraded}</span> : <span className="muted">0</span>}</td>
                   <td>{e.incidents > 0 ? <span className="badge down">{e.incidents}</span> : <span className="muted">0</span>}</td>

@@ -5,11 +5,32 @@ import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth";
 // health check, login page, and auth endpoints. Everything else needs a session.
 // /api/description enforces its OWN API key inside the route, so it bypasses the
 // dashboard session gate here (listed public) rather than requiring a login cookie.
-const PUBLIC_PREFIXES = ["/login", "/api/auth", "/api/exam", "/api/description", "/api/reports", "/api/resolve", "/api/qr", "/api/landings", "/api/health", "/_next", "/favicon"];
+// Anything under /api/admin is intentionally NOT here: those are dashboard-only
+// mutations (rename an exam, purge stale rows) and must require a session.
+const PUBLIC_PREFIXES = [
+  "/login",
+  "/api/auth",
+  "/api/exam",
+  "/api/exams",
+  "/api/description",
+  "/api/reports",
+  "/api/resolve",
+  "/api/qr",
+  "/api/landings",
+  "/api/health",
+  "/_next",
+  "/favicon",
+];
+
+/** Match on path segments, so "/api/exam" can't accidentally make
+ *  "/api/example-admin" public — only "/api/exam" itself and its children. */
+function isPublic(pathname: string): boolean {
+  return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));
+}
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return NextResponse.next();
+  if (isPublic(pathname)) return NextResponse.next();
 
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   const session = await verifySessionToken(token);

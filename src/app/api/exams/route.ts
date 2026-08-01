@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { effectiveName } from "@/lib/examName";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,7 @@ export async function GET(req: Request) {
     exams: exams.map((e) => ({
       site: e.site.key,
       examCode: e.examCode,
-      examName: e.examName,
+      examName: effectiveName(e),
       status: e.status,
       links: e._count.links,
       apiUrl: `/api/exams/${e.site.key}/${encodeURIComponent(e.examCode)}`,

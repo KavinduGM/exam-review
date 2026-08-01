@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { effectiveName } from "@/lib/examName";
 import { exactCodeWhere, fuzzyCodeWhere } from "@/lib/examLookup";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ site: string; 
     site: exam.site.key,
     siteName: exam.site.name,
     examCode: exam.examCode,
-    examName: exam.examName,
+    examName: effectiveName(exam),
     status: exam.status,
     landingUrl: exam.landingUrl,
     contactUrl: exam.contactUrl,

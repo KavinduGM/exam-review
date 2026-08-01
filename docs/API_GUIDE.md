@@ -141,6 +141,14 @@ handles automatically:
 authoritative source). `false` means it's a placeholder derived from the page
 title — usable, but not yet DB-verified.
 
+**Names can be hand-corrected.** Collected names sometimes carry vendor prefixes
+that don't belong in a video title (e.g. *"Elsevier (HESI): HESI Admission
+Assessment - HESI A2"*). An operator can edit any exam's name in the dashboard
+(✎ next to the name); the edit is stored separately from the collected name, is
+never overwritten by nightly collection, and **every endpoint above returns the
+edited name** in `examName`. No client change is needed — you always get the name
+that should appear in the video.
+
 **Ambiguous / not-found response (409 / 404)**
 
 ```json

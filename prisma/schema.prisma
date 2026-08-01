@@ -94,7 +94,10 @@ model Exam {
   siteId Int
 
   examCode String // the ?ec= value, e.g. "D426" / "HESI E2" / "IREB"
-  examName String
+  examName String // name as collected (exam-manager DB / page title) — overwritten by collection
+  // Manual override, edited in the dashboard. NEVER written by the collector, so
+  // it survives every re-collect. All read APIs return displayName ?? examName.
+  displayName  String?
   nameResolved Boolean @default(false) // true once the name came from the exam DB (else code placeholder)
 
   landingUrl      String

@@ -532,6 +532,8 @@ interface ExamWrite {
 }
 
 async function writeExam(w: ExamWrite): Promise<number> {
+  // NOTE: `displayName` is deliberately absent — it's the dashboard's manual name
+  // override and must survive every re-collect. Never add it to this object.
   const data = {
     examName: w.examName,
     nameResolved: w.nameResolved ?? false,
@@ -587,6 +589,7 @@ async function markStale(site: Site, seenIds: number[]): Promise<void> {
 
 export interface PurgeResult {
   deleted: number;
+  namesCarriedOver: number;
   kept: { id: number; examCode: string; examName: string; site: string; reason: string }[];
 }
 
@@ -595,29 +598,44 @@ export interface PurgeResult {
  * site shares the same landing page (the clean-code row that replaced the old
  * slug-coded one). Stale exams WITHOUT an active replacement are kept and
  * reported, so a real exam can never be silently dropped. Links/incidents cascade.
+ *
+ * A manual name edit (displayName) on a superseded row is copied to its
+ * replacement first (when the replacement has none), so purging never throws
+ * away hand-corrected names.
  */
 export async function purgeStaleExams(): Promise<PurgeResult> {
   const stale = await prisma.exam.findMany({ where: { status: "stale" }, include: { site: true } });
-  const active = await prisma.exam.findMany({ where: { status: { not: "stale" } }, select: { siteId: true, examCode: true, landingUrl: true } });
+  const active = await prisma.exam.findMany({
+    where: { status: { not: "stale" } },
+    select: { id: true, siteId: true, examCode: true, landingUrl: true, displayName: true },
+  });
 
   // Index active exams by site → normalized landing, and site → clean code.
-  const activeLanding = new Set(active.map((e) => `${e.siteId}|${normalizeUrl(e.landingUrl)}`));
-  const activeCode = new Set(active.map((e) => `${e.siteId}|${e.examCode.toUpperCase()}`));
+  const activeByLanding = new Map(active.map((e) => [`${e.siteId}|${normalizeUrl(e.landingUrl)}`, e]));
+  const activeByCode = new Map(active.map((e) => [`${e.siteId}|${e.examCode.toUpperCase()}`, e]));
 
   const toDelete: number[] = [];
   const kept: PurgeResult["kept"] = [];
+  const carryOver = new Map<number, string>(); // replacement exam id -> displayName
   for (const e of stale) {
     const cleanCode = codeFromSlug(e.examCode) ?? codeFromLanding(e.landingUrl);
-    const hasReplacement =
-      activeLanding.has(`${e.siteId}|${normalizeUrl(e.landingUrl)}`) ||
-      (cleanCode ? activeCode.has(`${e.siteId}|${cleanCode.toUpperCase()}`) : false);
-    if (hasReplacement) toDelete.push(e.id);
-    else kept.push({ id: e.id, examCode: e.examCode, examName: e.examName, site: e.site.key, reason: "no active replacement — review before removing" });
+    const replacement =
+      activeByLanding.get(`${e.siteId}|${normalizeUrl(e.landingUrl)}`) ??
+      (cleanCode ? activeByCode.get(`${e.siteId}|${cleanCode.toUpperCase()}`) : undefined);
+    if (!replacement) {
+      kept.push({ id: e.id, examCode: e.examCode, examName: e.examName, site: e.site.key, reason: "no active replacement — review before removing" });
+      continue;
+    }
+    // Preserve a hand-edited name by moving it onto the row that replaces this one.
+    const override = e.displayName?.trim();
+    if (override && !replacement.displayName?.trim() && !carryOver.has(replacement.id)) carryOver.set(replacement.id, override);
+    toDelete.push(e.id);
   }
 
+  for (const [id, displayName] of carryOver) await prisma.exam.update({ where: { id }, data: { displayName } });
   if (toDelete.length > 0) await prisma.exam.deleteMany({ where: { id: { in: toDelete } } });
-  logger.info({ deleted: toDelete.length, kept: kept.length }, "purge stale exams");
-  return { deleted: toDelete.length, kept };
+  logger.info({ deleted: toDelete.length, kept: kept.length, namesCarriedOver: carryOver.size }, "purge stale exams");
+  return { deleted: toDelete.length, namesCarriedOver: carryOver.size, kept };
 }
 
 function pageCode(url: string): string {

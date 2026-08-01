@@ -1,6 +1,7 @@
 import type { Exam, Site } from "@prisma/client";
 import { prisma } from "./prisma";
 import { groupKeyForSite } from "./groups";
+import { effectiveName } from "./examName";
 
 export type MatchConfidence = "exact" | "strong" | "ambiguous" | "none";
 
@@ -53,8 +54,10 @@ function scoreExam(exam: Exam, wantRaw: string): { score: number; via: string } 
   if (code.endsWith(want) && want.length >= 3) return { score: 70, via: `request is a suffix of code "${exam.examCode}"` };
 
   // The requested token appears whole inside the exam name
-  // ("TEAS" in "Test of Essential Academic Skills - TEAS").
+  // ("TEAS" in "Test of Essential Academic Skills - TEAS"). Search the manual
+  // override too, so a renamed exam stays findable by words in its new name.
   if (nameTokens(exam.examName).has(want)) return { score: 60, via: "matched a word in the exam name" };
+  if (exam.displayName && nameTokens(exam.displayName).has(want)) return { score: 60, via: "matched a word in the edited exam name" };
 
   // The timed slug ends with the code ("…-c720" for "C720").
   if (exam.timedSlug && norm(exam.timedSlug).endsWith(want) && want.length >= 3) {
@@ -103,7 +106,7 @@ export async function resolveExam(siteKey: string, wantCode: string): Promise<Re
   if (ranked.length === 0) return empty;
 
   const top = ranked[0];
-  const candidates = ranked.slice(0, 5).map((r) => ({ examCode: r.e.examCode, examName: r.e.examName, site: r.e.site.key, score: r.score }));
+  const candidates = ranked.slice(0, 5).map((r) => ({ examCode: r.e.examCode, examName: effectiveName(r.e), site: r.e.site.key, score: r.score }));
 
   // Confidence: exact code = exact; a clear single strong winner = strong;
   // a near-tie between different exams = ambiguous.

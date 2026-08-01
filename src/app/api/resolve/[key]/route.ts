@@ -3,6 +3,7 @@ import { env } from "@/lib/env";
 import { descriptionKeyOk } from "@/lib/apikey";
 import { parseChannelKey, CHANNEL_TO_SITE } from "@/config/channels";
 import { resolveExam } from "@/lib/resolveExam";
+import { effectiveName } from "@/lib/examName";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +53,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ key: string }> 
     ...base,
     resolved: true,
     examCode: exam.examCode,
-    examName: exam.examName,
+    examName: effectiveName(exam),
     nameResolved: exam.nameResolved, // true = name came from the exam-manager DB (authoritative)
     links: {
       studyGuide: exam.landingUrl,

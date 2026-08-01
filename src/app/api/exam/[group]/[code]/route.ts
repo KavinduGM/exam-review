@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { effectiveName } from "@/lib/examName";
 import { exactCodeWhere, fuzzyCodeWhere } from "@/lib/examLookup";
 
 export const dynamic = "force-dynamic";
@@ -33,9 +34,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ group: string;
   }
   if (exams.length === 0) return NextResponse.json({ error: "exam not found", group, code: examCode }, { status: 404 });
 
-  const named = exams.find((e) => e.nameResolved);
-  const descriptive = named?.examName ?? exams[0].examName;
-  const canonicalName = `${grp.namePrefix ? grp.namePrefix + " " : ""}${examCode}${named ? " - " + descriptive : ""}`;
+  // A manual name override wins over the DB-resolved name; then nameResolved.
+  const named = exams.find((e) => e.displayName?.trim()) ?? exams.find((e) => e.nameResolved);
+  const canonicalName = `${grp.namePrefix ? grp.namePrefix + " " : ""}${examCode}${named ? " - " + effectiveName(named) : ""}`;
 
   // Per-site blocks (study guide, contact, practice by subdomain).
   const sites = exams.map((e) => {

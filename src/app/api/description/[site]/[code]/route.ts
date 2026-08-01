@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { effectiveName } from "@/lib/examName";
 import { env } from "@/lib/env";
 import { descriptionKeyOk as keyOk } from "@/lib/apikey";
 import { exactCodeWhere, fuzzyCodeWhere } from "@/lib/examLookup";
@@ -54,7 +55,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ site: string; c
     site: exam.site.key,
     siteName: exam.site.name,
     examCode: exam.examCode,
-    examName: exam.examName,
+    examName: effectiveName(exam),
     nameResolved: exam.nameResolved,
     links,
     status,

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { effectiveName } from "@/lib/examName";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export async function GET(req: Request) {
     if (!grp) return NextResponse.json({ error: "group not found" }, { status: 404 });
     const exams = await prisma.exam.findMany({
       where: { site: { groupId: grp.id } },
-      select: { examCode: true, examName: true, nameResolved: true },
+      select: { examCode: true, examName: true, displayName: true, nameResolved: true },
     });
     // Distinct by code (OAP + OAG share a code).
     const byCode = new Map<string, { examCode: string; name: string; nameResolved: boolean }>();
@@ -23,7 +24,7 @@ export async function GET(req: Request) {
       if (!cur || (!cur.nameResolved && e.nameResolved)) {
         byCode.set(e.examCode, {
           examCode: e.examCode,
-          name: `${grp.namePrefix ? grp.namePrefix + " " : ""}${e.examCode}${e.nameResolved ? " - " + e.examName : ""}`,
+          name: `${grp.namePrefix ? grp.namePrefix + " " : ""}${e.examCode}${e.nameResolved || e.displayName ? " - " + effectiveName(e) : ""}`,
           nameResolved: e.nameResolved,
         });
       }

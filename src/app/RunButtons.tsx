@@ -27,11 +27,11 @@ export function RunButtons() {
   async function purgeStale() {
     if (!confirm("Delete superseded 'stale' exams (old slug-coded duplicates that now have a clean-code active row)?\n\nSafe: only removes exams that have an active replacement. Stale exams without a replacement are kept for review.")) return;
     setMsg("Purging stale exams…");
-    const res = await fetch("/api/exams/purge-stale", { method: "POST" });
+    const res = await fetch("/api/admin/purge-stale", { method: "POST" });
     const data = await res.json().catch(() => ({}));
     setMsg(
       res.ok
-        ? `Removed ${data.deleted} superseded exam(s)${data.kept?.length ? ` · kept ${data.kept.length} for review` : ""}`
+        ? `Removed ${data.deleted} superseded exam(s)${data.namesCarriedOver ? ` · kept ${data.namesCarriedOver} edited name(s)` : ""}${data.kept?.length ? ` · kept ${data.kept.length} for review` : ""}`
         : `Failed: ${data.error}`,
     );
     setTimeout(() => router.refresh(), 1200);
