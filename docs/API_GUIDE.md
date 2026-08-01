@@ -317,7 +317,8 @@ curl -X POST -H "x-api-key: $KEY" -H "content-type: application/json" \
   now (your reviewer hit a transient blip). **Safe to publish.** Nothing tracked.
 - **`202` `{ "tracked": true, "reportId": 42, "status": "down"|"degraded" }`** —
   confirmed broken. We now:
-  1. Re-check it every ~10 minutes.
+  1. Re-check it every ~15 minutes (reported links are watched closely, even
+     though the full site-wide sweep runs once a day).
   2. **POST your `callbackUrl`** (or the server-configured `DESCRIPTION_WEBHOOK_URL`)
      when it recovers.
   3. **Email the admin** if it's still down after `REPORT_ESCALATION_HOURS`
@@ -402,4 +403,5 @@ For each (channel, examCode) the automation processes:
 - All timestamps are ISO-8601 UTC.
 - Link `status` values: `up`, `degraded` (loads but content looks wrong), `down`.
 - A resolve/description call reflects the **latest collected** data; collection
-  refreshes daily, uptime every ~10 minutes.
+  refreshes daily, and the full uptime sweep runs daily; links you REPORT as broken
+  are re-checked every ~15 minutes until they recover.

@@ -13,6 +13,10 @@ export async function registerSchedules(): Promise<void> {
   await auditorQueue.upsertJobScheduler("cron-uptime", { pattern: env.cron.uptime, tz: process.env.TZ }, { name: "uptime", data: {} });
   await auditorQueue.upsertJobScheduler("cron-collect", { pattern: env.cron.collect, tz: process.env.TZ }, { name: "collect", data: {} });
   await auditorQueue.upsertJobScheduler("cron-audit", { pattern: env.cron.audit, tz: process.env.TZ }, { name: "audit", data: {} });
+  await auditorQueue.upsertJobScheduler("cron-reports", { pattern: env.cron.reports, tz: process.env.TZ }, { name: "reports", data: {} });
 
-  logger.info({ uptime: env.cron.uptime, collect: env.cron.collect, audit: env.cron.audit }, "schedules registered");
+  logger.info(
+    { uptime: env.cron.uptime, collect: env.cron.collect, audit: env.cron.audit, reports: env.cron.reports },
+    "schedules registered",
+  );
 }

@@ -11,6 +11,7 @@ import { ensureSitesSeeded } from "@/lib/seed";
 import { ensureGroups } from "@/lib/groups";
 import { collectAllSites } from "@/collector/collect";
 import { runUptimeSweep } from "@/monitor/run";
+import { processOpenReports } from "@/monitor/reports";
 import { runWeeklyAudit } from "@/audit/run";
 import { closeBrowser } from "@/audit/screenshot";
 
@@ -33,6 +34,9 @@ async function main() {
           return runUptimeSweep(onProgress);
         case "audit":
           return runWeeklyAudit(onProgress);
+        case "reports":
+          // Cheap: only re-checks links the description system flagged as broken.
+          return processOpenReports();
         default:
           throw new Error(`unknown job: ${job.name}`);
       }

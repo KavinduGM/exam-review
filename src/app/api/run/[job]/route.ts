@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { enqueue, type JobName } from "@/queue/queues";
 
-const VALID: JobName[] = ["collect", "uptime", "audit"];
+const VALID: JobName[] = ["collect", "uptime", "audit", "reports"];
 
 // POST /api/run/{job}  (protected by middleware)
 // Manually trigger a collect / uptime / audit run from the dashboard.

@@ -67,9 +67,12 @@ export const env = {
   },
 
   cron: {
-    uptime: str("UPTIME_CRON", "*/10 * * * *"),
+    uptime: str("UPTIME_CRON", "0 6 * * *"), // daily full sweep of every link
     collect: str("COLLECT_CRON", "0 3 * * *"), // daily — backfills exam names as they're added
     audit: str("AUDIT_CRON", "0 4 * * 1"),
+    // Lightweight: re-checks ONLY links the description system reported broken,
+    // so recovery webhooks stay timely even though the full sweep is daily.
+    reports: str("REPORTS_CRON", "*/15 * * * *"),
   },
 
   tuning: {

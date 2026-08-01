@@ -3,7 +3,7 @@ import { redisConnection } from "@/lib/redis";
 
 export const QUEUE_NAME = "auditor";
 
-export type JobName = "collect" | "uptime" | "audit";
+export type JobName = "collect" | "uptime" | "audit" | "reports";
 
 export const auditorQueue = new Queue(QUEUE_NAME, {
   connection: redisConnection,
