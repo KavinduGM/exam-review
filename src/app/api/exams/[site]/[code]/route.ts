@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { effectiveLanding, effectiveContact } from "@/lib/examUrls";
 import { effectiveName } from "@/lib/examName";
 import { exactCodeWhere, fuzzyCodeWhere } from "@/lib/examLookup";
 
@@ -32,8 +33,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ site: string; 
     examCode: exam.examCode,
     examName: effectiveName(exam),
     status: exam.status,
-    landingUrl: exam.landingUrl,
-    contactUrl: exam.contactUrl,
+    landingUrl: effectiveLanding(exam),
+    contactUrl: effectiveContact(exam),
     counts: { sets: exam.setsCount, parts: exam.partsCount, timedSets: exam.timedSetsCount },
     landing: byType("LANDING").map((l) => l.url)[0] ?? null,
     practice: byType("PRACTICE").map((l) => ({ set: l.setNo, part: l.part, subdomain: l.variant || "questions", url: l.url, status: l.lastStatus })),

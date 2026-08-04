@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { ExamNameEditor } from "@/app/ExamNameEditor";
+import { ExamUrlsEditor } from "@/app/ExamUrlsEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -78,6 +79,24 @@ export default async function ExamPage({ params }: { params: Promise<{ id: strin
         <p className="muted" style={{ marginTop: 0 }}>
           {exam.examCode} · {exam.site.name} · {links.length} links{exam.notes ? ` · ${exam.notes}` : ""}
         </p>
+
+        <ExamUrlsEditor
+          examId={exam.id}
+          initial={{
+            collected: {
+              landingUrl: exam.landingUrl,
+              practiceUrl: exam.practiceBaseUrl,
+              timedUrl: exam.timedBaseUrl,
+              contactUrl: exam.contactUrl,
+            },
+            overrides: {
+              landingUrl: exam.landingUrlOverride,
+              practiceUrl: exam.practiceUrlOverride,
+              timedUrl: exam.timedUrlOverride,
+              contactUrl: exam.contactUrlOverride,
+            },
+          }}
+        />
 
         <div className="cards">
           <div className="card"><div className="n" style={{ color: problems.length ? "var(--down)" : "var(--up)" }}>{problems.length}</div><div className="l">Links with issues</div></div>

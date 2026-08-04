@@ -1,4 +1,4 @@
-import { Prisma, type Site } from "@prisma/client";
+import { Prisma, type Exam, type Site } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { fetchUrl, mapLimit } from "@/lib/http";
@@ -9,6 +9,7 @@ import { enumerateLinks, type GeneratedLink, type PracticeBase, type EnumerateIn
 import { constructPracticeUrl, constructTimedUrl, timedSetUrl, normalizeUrl, hostOf } from "./construct";
 import { loadTimedIndex, loadPracticeIndex, type TimedIndexEntry, type PracticeIndexEntry } from "@/sources";
 import { ensureGroups } from "@/lib/groups";
+import { effectiveLanding, effectivePractice, effectiveTimed, effectiveContact } from "@/lib/examUrls";
 import type { ProgressFn } from "@/lib/progress";
 
 const SKIP_PATTERNS = [
@@ -34,6 +35,11 @@ interface DbIndex {
   // Canonical exam names from the timed (exam-manager) DB.
   nameByLanding: Map<string, string>; // normalized back_link -> exam_name
   nameByCode: Map<string, string>; // UPPER code (from slug) -> exam_name
+}
+
+/** Which set/part encoding a practice URL uses (path .../setN-partM.html vs query ?set=&part=). */
+function practiceFormatOf(url: string): PracticeFormat {
+  return /\/classes\/[^/]+\/set\d+-part\d+/i.test(url) ? "path" : "query";
 }
 
 /** Pull a course code out of a timed slug, e.g. "…-d216" -> "D216". */
@@ -255,7 +261,7 @@ async function collectSimpleSite(site: Site, dbIndex: DbIndex): Promise<CollectS
   const seen: number[] = [];
   await mapLimit(pages, env.tuning.httpConcurrency, async (url) => {
     try {
-      const examId = await writeExam({
+      const examRow = await writeExam({
         site,
         examCode: pageCode(url),
         examName: pageName(url),
@@ -272,7 +278,8 @@ async function collectSimpleSite(site: Site, dbIndex: DbIndex): Promise<CollectS
         timedDbExamId: null,
         notes: [],
       });
-      await syncLinksList(examId, [{ type: "LANDING", setNo: 0, part: 0, variant: "", url }]);
+      const examId = examRow.id;
+      await syncLinksList(examId, [{ type: "LANDING", setNo: 0, part: 0, variant: "", url: effectiveLanding(examRow) }]);
       seen.push(examId);
       result.examsFound++;
       result.linksUpserted++;
@@ -313,7 +320,7 @@ async function collectTimedHostSite(site: Site, dbIndex: DbIndex): Promise<Colle
     const links: GeneratedLink[] = [];
     for (let i = 1; i <= sets; i++) links.push({ type: "TIMED", setNo: i, part: 0, variant: "", url: timedSetUrl(t.slug, i) });
     try {
-      const examId = await writeExam({
+      const examRow = await writeExam({
         site,
         examCode: t.slug,
         examName: t.examName || t.slug,
@@ -331,6 +338,7 @@ async function collectTimedHostSite(site: Site, dbIndex: DbIndex): Promise<Colle
         timedDbExamId: t.dbExamId,
         notes: [],
       });
+      const examId = examRow.id;
       await syncLinksList(examId, links);
       seen.push(examId);
       result.examsFound++;
@@ -450,7 +458,7 @@ async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Prom
   }
   if (variant) notes.push(`multi-part course: variant ${variant} (practice code ${code})`);
 
-  const examId = await writeExam({
+  const examRow = await writeExam({
     site,
     examCode,
     examName,
@@ -469,7 +477,22 @@ async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Prom
     notes,
   });
 
-  const linkCount = await syncLinks(examId, { landingUrl: ex.landingUrl, practices, timedUrl, contactUrl, timedSetsCount });
+  const examId = examRow.id;
+
+  // Manual URL corrections win over whatever collection found, so the links we
+  // monitor (and hand to the APIs / QR codes) are the corrected ones.
+  const finalPractices = practices.map((p, i) =>
+    i === 0 && examRow.practiceUrlOverride?.trim()
+      ? { ...p, baseUrl: examRow.practiceUrlOverride.trim(), format: practiceFormatOf(examRow.practiceUrlOverride.trim()) }
+      : p,
+  );
+  const linkCount = await syncLinks(examId, {
+    landingUrl: effectiveLanding(examRow),
+    practices: finalPractices,
+    timedUrl: effectiveTimed(examRow) ?? timedUrl,
+    contactUrl: effectiveContact(examRow) ?? contactUrl,
+    timedSetsCount,
+  });
   return { examId, linkCount, practiceVerified: Boolean(practiceInfo), timedVerified: Boolean(timedInfo) };
 }
 
@@ -531,7 +554,7 @@ interface ExamWrite {
   notes: string[];
 }
 
-async function writeExam(w: ExamWrite): Promise<number> {
+async function writeExam(w: ExamWrite) {
   // NOTE: `displayName` is deliberately absent — it's the dashboard's manual name
   // override and must survive every re-collect. Never add it to this object.
   const data = {
@@ -557,7 +580,46 @@ async function writeExam(w: ExamWrite): Promise<number> {
     create: { siteId: w.site.id, examCode: w.examCode, ...data },
     update: data,
   });
-  return exam.id;
+  return exam;
+}
+
+/**
+ * Re-point an exam's links at its EFFECTIVE entry URLs (manual corrections
+ * included) without waiting for the next collect. Upsert-only on purpose: it
+ * never deactivates links, so a second practice subdomain's links survive.
+ * Returns how many links were written.
+ */
+export async function syncEntryLinks(exam: Exam): Promise<number> {
+  const practiceBase = effectivePractice(exam);
+  const practices: PracticeBase[] = practiceBase
+    ? [
+        {
+          variant: exam.practiceSource === "OLD" ? "answers" : "questions",
+          baseUrl: practiceBase,
+          format: practiceFormatOf(practiceBase),
+          sets: exam.setsCount,
+          parts: exam.partsCount,
+        },
+      ]
+    : [];
+
+  const generated = enumerateLinks({
+    landingUrl: effectiveLanding(exam),
+    practices,
+    timedUrl: effectiveTimed(exam),
+    contactUrl: effectiveContact(exam),
+    timedSetsCount: exam.timedSetsCount,
+  });
+
+  for (const g of generated) {
+    await prisma.link.upsert({
+      where: { examId_type_setNo_part_variant: { examId: exam.id, type: g.type, setNo: g.setNo, part: g.part, variant: g.variant } },
+      create: { examId: exam.id, type: g.type, setNo: g.setNo, part: g.part, variant: g.variant, url: g.url, active: true },
+      update: { url: g.url, active: true },
+    });
+  }
+  logger.info({ examId: exam.id, links: generated.length }, "entry links re-synced from manual URL overrides");
+  return generated.length;
 }
 
 async function syncLinks(examId: number, input: EnumerateInput): Promise<number> {

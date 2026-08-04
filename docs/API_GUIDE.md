@@ -141,6 +141,13 @@ handles automatically:
 authoritative source). `false` means it's a placeholder derived from the page
 title — usable, but not yet DB-verified.
 
+**URLs can be hand-corrected too.** If collection picked up a wrong page for an
+exam, an operator can fix any of the four entry URLs on the exam page in the
+dashboard (**✎ Fix URLs**). Corrections are stored separately from the collected
+values, are never overwritten by nightly collection, become what the monitor
+checks and what the QR code encodes, and are returned by every endpoint here. A
+corrected practice/timed base also regenerates all of its set/part links.
+
 **Names can be hand-corrected.** Collected names sometimes carry vendor prefixes
 that don't belong in a video title (e.g. *"Elsevier (HESI): HESI Admission
 Assessment - HESI A2"*). An operator can edit any exam's name in the dashboard

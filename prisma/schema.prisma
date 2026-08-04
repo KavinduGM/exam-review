@@ -107,6 +107,14 @@ model Exam {
   timedSlug       String?
   contactUrl      String?
 
+  // Manual URL corrections, edited in the dashboard. NEVER written by the
+  // collector, so they survive every re-collect. When set, they are what we
+  // monitor, what the APIs return, and what the QR codes encode.
+  landingUrlOverride  String?
+  practiceUrlOverride String?
+  timedUrlOverride    String?
+  contactUrlOverride  String?
+
   // Resolved counts (DB-authoritative when available, else site defaults).
   setsCount      Int @default(5)
   partsCount     Int @default(3)

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { effectiveEntryLinks } from "@/lib/examUrls";
 import { effectiveName } from "@/lib/examName";
 import { env } from "@/lib/env";
 import { descriptionKeyOk as keyOk } from "@/lib/apikey";
@@ -34,12 +35,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ site: string; c
   }
 
   // Entry links come straight off the exam (the site's primary practice/timed).
-  const links: DescriptionLinks = {
-    studyGuide: exam.landingUrl,
-    practiceQuestions: exam.practiceBaseUrl,
-    timedExams: exam.timedBaseUrl,
-    contact: exam.contactUrl,
-  };
+  const links: DescriptionLinks = effectiveEntryLinks(exam);
 
   // Attach current health of each entry link (so a caller can skip a down link).
   const statusOf = (url: string | null) => (url ? (exam.links.find((l) => l.url === url)?.lastStatus ?? null) : null);

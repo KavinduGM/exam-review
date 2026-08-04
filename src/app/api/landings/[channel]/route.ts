@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { effectiveLanding } from "@/lib/examUrls";
 import { effectiveName } from "@/lib/examName";
 import { CHANNEL_TO_SITE, qrFilenameBase } from "@/config/channels";
 import { env } from "@/lib/env";
@@ -30,6 +31,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ channel: string
       displayName: true,
       nameResolved: true,
       landingUrl: true,
+      landingUrlOverride: true,
       links: { where: { type: "LANDING", active: true }, select: { lastStatus: true }, take: 1 },
     },
     orderBy: { examCode: "asc" },
@@ -41,7 +43,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ channel: string
       examCode: e.examCode,
       examName: effectiveName(e),
       nameResolved: e.nameResolved,
-      landingUrl: e.landingUrl,
+      landingUrl: effectiveLanding(e),
       landingStatus: e.links[0]?.lastStatus ?? null,
       qrUrl: `${base}/api/qr/${site}/${encodeURIComponent(e.examCode)}`, // append ?format=svg / ?download=1
       qrFilename: `${qrFilenameBase(channel.toUpperCase(), e.examCode, effectiveName(e))}.png`,

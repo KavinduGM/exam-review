@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import QRCode from "qrcode";
 import { prisma } from "@/lib/prisma";
+import { effectiveLanding } from "@/lib/examUrls";
 import { exactCodeWhere, fuzzyCodeWhere } from "@/lib/examLookup";
 
 export const dynamic = "force-dynamic";
@@ -18,13 +19,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ site: string; c
   const size = Math.min(2048, Math.max(128, Number(url.searchParams.get("size")) || 512));
   const download = url.searchParams.get("download") === "1";
 
-  const select = { examCode: true, landingUrl: true } as const;
+  const select = { examCode: true, landingUrl: true, landingUrlOverride: true } as const;
   const exam =
     (await prisma.exam.findFirst({ where: { ...exactCodeWhere(examCode), site: { key: site } }, select })) ??
     (await prisma.exam.findFirst({ where: { ...fuzzyCodeWhere(examCode), site: { key: site } }, select }));
 
   if (!exam) return NextResponse.json({ error: "exam not found", site, code: examCode }, { status: 404 });
-  if (!exam.landingUrl) return NextResponse.json({ error: "exam has no landing URL", site, code: examCode }, { status: 422 });
+  const target = effectiveLanding(exam);
+  if (!target) return NextResponse.json({ error: "exam has no landing URL", site, code: examCode }, { status: 422 });
 
   const opts = { margin: 2, errorCorrectionLevel: "M" as const };
   const filenameBase = `${site}-${exam.examCode}-qr`;
@@ -32,7 +34,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ site: string; c
   const cache = "public, max-age=86400, stale-while-revalidate=604800";
 
   if (format === "svg") {
-    const svg = await QRCode.toString(exam.landingUrl, { ...opts, type: "svg", width: size });
+    const svg = await QRCode.toString(target, { ...opts, type: "svg", width: size });
     return new NextResponse(svg, {
       headers: {
         "content-type": "image/svg+xml; charset=utf-8",
@@ -42,7 +44,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ site: string; c
     });
   }
 
-  const png = await QRCode.toBuffer(exam.landingUrl, { ...opts, type: "png", width: size });
+  const png = await QRCode.toBuffer(target, { ...opts, type: "png", width: size });
   return new NextResponse(new Uint8Array(png), {
     headers: {
       "content-type": "image/png",

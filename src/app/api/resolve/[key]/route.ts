@@ -4,6 +4,7 @@ import { descriptionKeyOk } from "@/lib/apikey";
 import { parseChannelKey, CHANNEL_TO_SITE } from "@/config/channels";
 import { resolveExam } from "@/lib/resolveExam";
 import { effectiveName } from "@/lib/examName";
+import { effectiveEntryLinks } from "@/lib/examUrls";
 
 export const dynamic = "force-dynamic";
 
@@ -55,12 +56,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ key: string }> 
     examCode: exam.examCode,
     examName: effectiveName(exam),
     nameResolved: exam.nameResolved, // true = name came from the exam-manager DB (authoritative)
-    links: {
-      studyGuide: exam.landingUrl,
-      practiceQuestions: exam.practiceBaseUrl,
-      timedExams: exam.timedBaseUrl,
-      contact: exam.contactUrl,
-    },
+    links: effectiveEntryLinks(exam),
     // Other exams that also scored (empty when the match was unambiguous).
     alternativeCandidates: result.candidates.filter((c) => c.examCode !== exam.examCode),
   });
