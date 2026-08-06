@@ -58,10 +58,10 @@ export default async function SitePage({
 
       <div className="wrap">
         <div className="cards">
-          <div className="card"><div className="n">{rows.length}</div><div className="l">Exams</div></div>
-          <div className="card"><div className="n">{withIssues.length}</div><div className="l">Exams with issues</div></div>
-          <div className="card"><div className="n" style={{ color: "var(--down)" }}>{[...down.values()].reduce((a, b) => a + b, 0)}</div><div className="l">Down links</div></div>
-          <div className="card"><div className="n" style={{ color: "var(--degraded)" }}>{[...degraded.values()].reduce((a, b) => a + b, 0)}</div><div className="l">Degraded links</div></div>
+          <div className="card is-accent"><div className="n">{rows.length}</div><div className="l">Exams</div></div>
+          <div className={`card ${withIssues.length ? "is-degraded" : "is-up"}`}><div className="n">{withIssues.length}</div><div className="l">Exams with issues</div></div>
+          <div className="card is-down"><div className="n" style={{ color: "var(--down)" }}>{[...down.values()].reduce((a, b) => a + b, 0)}</div><div className="l">Down links</div></div>
+          <div className="card is-degraded"><div className="n" style={{ color: "var(--degraded)" }}>{[...degraded.values()].reduce((a, b) => a + b, 0)}</div><div className="l">Degraded links</div></div>
         </div>
 
         <div className="row" style={{ justifyContent: "space-between" }}>
@@ -75,24 +75,26 @@ export default async function SitePage({
         {shown.length === 0 ? (
           <p className="muted">{onlyIssues ? "No exams with issues. 🎉" : "No exams collected yet."}</p>
         ) : (
-          <table>
-            <thead><tr><th>Code</th><th>Exam</th><th>Down</th><th>Degraded</th><th>Incidents</th><th></th></tr></thead>
-            <tbody>
-              {shown.map((e) => (
-                <tr key={e.id}>
-                  <td><Link href={`/exam/${e.id}`}>{e.examCode}</Link></td>
-                  <td>
-                    <ExamNameEditor examId={e.id} collectedName={e.examName} displayName={e.displayName} />
-                    {e.status === "stale" && <span className="badge unknown"> stale</span>}
-                  </td>
-                  <td>{e.down > 0 ? <span className="badge down">{e.down}</span> : <span className="muted">0</span>}</td>
-                  <td>{e.degraded > 0 ? <span className="badge degraded">{e.degraded}</span> : <span className="muted">0</span>}</td>
-                  <td>{e.incidents > 0 ? <span className="badge down">{e.incidents}</span> : <span className="muted">0</span>}</td>
-                  <td><Link href={`/exam/${e.id}`}>Open →</Link></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table>
+              <thead><tr><th>Code</th><th>Exam</th><th>Down</th><th>Degraded</th><th>Incidents</th><th></th></tr></thead>
+              <tbody>
+                {shown.map((e) => (
+                  <tr key={e.id}>
+                    <td><Link href={`/exam/${e.id}`}>{e.examCode}</Link></td>
+                    <td>
+                      <ExamNameEditor examId={e.id} collectedName={e.examName} displayName={e.displayName} />
+                      {e.status === "stale" && <span className="badge unknown"> stale</span>}
+                    </td>
+                    <td>{e.down > 0 ? <span className="badge down">{e.down}</span> : <span className="muted">0</span>}</td>
+                    <td>{e.degraded > 0 ? <span className="badge degraded">{e.degraded}</span> : <span className="muted">0</span>}</td>
+                    <td>{e.incidents > 0 ? <span className="badge down">{e.incidents}</span> : <span className="muted">0</span>}</td>
+                    <td><Link href={`/exam/${e.id}`}>Open →</Link></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </>

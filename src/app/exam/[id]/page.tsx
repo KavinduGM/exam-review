@@ -54,10 +54,12 @@ export default async function ExamPage({ params }: { params: Promise<{ id: strin
     items.length > 0 && (
       <>
         <h3>{title} <span className="muted">({items.length})</span></h3>
-        <table>
-          <thead><tr><th>Link</th><th>URL</th><th>Status</th><th>Checked</th></tr></thead>
-          <tbody>{renderRows(items)}</tbody>
-        </table>
+        <div className="table-scroll">
+          <table>
+            <thead><tr><th>Link</th><th>URL</th><th>Status</th><th>Checked</th></tr></thead>
+            <tbody>{renderRows(items)}</tbody>
+          </table>
+        </div>
       </>
     );
 
@@ -99,8 +101,8 @@ export default async function ExamPage({ params }: { params: Promise<{ id: strin
         />
 
         <div className="cards">
-          <div className="card"><div className="n" style={{ color: problems.length ? "var(--down)" : "var(--up)" }}>{problems.length}</div><div className="l">Links with issues</div></div>
-          <div className="card"><div className="n">{exam.incidents.length}</div><div className="l">Open incidents</div></div>
+          <div className={`card ${problems.length ? "is-down" : "is-up"}`}><div className="n" style={{ color: problems.length ? "var(--down)" : "var(--up)" }}>{problems.length}</div><div className="l">Links with issues</div></div>
+          <div className={`card ${exam.incidents.length ? "is-down" : "is-up"}`}><div className="n">{exam.incidents.length}</div><div className="l">Open incidents</div></div>
           <div className="card"><div className="n">{byType("PRACTICE").length}</div><div className="l">Practice links</div></div>
           <div className="card"><div className="n">{byType("TIMED").length}</div><div className="l">Timed links</div></div>
         </div>
@@ -109,19 +111,21 @@ export default async function ExamPage({ params }: { params: Promise<{ id: strin
         {exam.incidents.length === 0 ? (
           <p className="muted">No open incidents for this exam. 🎉</p>
         ) : (
-          <table>
-            <thead><tr><th>Link</th><th>Severity</th><th>Error</th><th>Since</th></tr></thead>
-            <tbody>
-              {exam.incidents.map((i) => (
-                <tr key={i.id}>
-                  <td><a href={i.link.url} target="_blank" rel="noreferrer">{linkLabel(i.link)}{i.link.variant ? ` (${i.link.variant})` : ""}</a></td>
-                  <td>{statusBadge(i.severity)}</td>
-                  <td className="muted">{i.lastError ?? ""}</td>
-                  <td className="muted">{i.openedAt.toISOString().slice(0, 16).replace("T", " ")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table>
+              <thead><tr><th>Link</th><th>Severity</th><th>Error</th><th>Since</th></tr></thead>
+              <tbody>
+                {exam.incidents.map((i) => (
+                  <tr key={i.id}>
+                    <td><a href={i.link.url} target="_blank" rel="noreferrer">{linkLabel(i.link)}{i.link.variant ? ` (${i.link.variant})` : ""}</a></td>
+                    <td>{statusBadge(i.severity)}</td>
+                    <td className="muted">{i.lastError ?? ""}</td>
+                    <td className="muted">{i.openedAt.toISOString().slice(0, 16).replace("T", " ")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
 
         <h2>All links</h2>

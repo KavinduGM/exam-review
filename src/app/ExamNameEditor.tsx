@@ -56,8 +56,7 @@ export function ExamNameEditor({
           </span>
         )}{" "}
         <button
-          className="secondary"
-          style={{ padding: "0 6px", fontSize: "0.8em", lineHeight: 1.6 }}
+          className="icon"
           onClick={() => {
             setValue(current);
             setEditing(true);
