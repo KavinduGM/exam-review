@@ -3,6 +3,7 @@ import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { fetchUrl } from "@/lib/http";
 import { checkLink } from "./check";
+import { effectiveName } from "@/lib/examName";
 import { sendReportEscalation, type EscalationItem } from "@/notify/resend";
 
 /**
@@ -76,7 +77,7 @@ export async function processOpenReports(): Promise<{ checked: number; recovered
       toEscalate.push({
         url: r.url,
         site: r.link?.exam.site.name ?? "unknown site",
-        exam: r.link?.exam.examName ?? "unregistered link",
+        exam: r.link ? effectiveName(r.link.exam) : "unregistered link",
         reportedAt: r.reportedAt,
         hoursDown: Math.round(hoursDown),
         error: error ?? "",
@@ -98,7 +99,7 @@ async function sendRecoveryWebhook(r: {
   callbackUrl: string | null;
   reportedAt: Date;
   context: unknown;
-  link: { exam: { examCode: string; examName: string; site: { key: string } } } | null;
+  link: { exam: { examCode: string; examName: string; displayName: string | null; site: { key: string } } } | null;
 }): Promise<"sent" | "none" | "failed"> {
   const target = r.callbackUrl || env.reports.webhookUrl;
   if (!target) return "none";
@@ -109,7 +110,7 @@ async function sendRecoveryWebhook(r: {
     url: r.url,
     site: r.link?.exam.site.key ?? null,
     examCode: r.link?.exam.examCode ?? null,
-    examName: r.link?.exam.examName ?? null,
+    examName: r.link ? effectiveName(r.link.exam) : null,
     context: r.context ?? null,
     reportedAt: r.reportedAt,
     recoveredAt: new Date().toISOString(),

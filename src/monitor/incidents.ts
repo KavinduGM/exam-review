@@ -1,6 +1,7 @@
 import type { Exam, Link } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { CheckOutcome } from "./check";
+import { effectiveName } from "@/lib/examName";
 import type { DownItem } from "@/notify/resend";
 
 export interface IncidentTransition {
@@ -25,7 +26,7 @@ export async function reconcileIncident(
   });
 
   const item: DownItem = {
-    exam: exam.examName,
+    exam: effectiveName(exam),
     site: exam.site.name,
     type: link.type + (link.setNo ? ` set${link.setNo}${link.part ? `p${link.part}` : ""}` : ""),
     url: link.url,

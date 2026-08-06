@@ -29,17 +29,31 @@ export default async function Dashboard() {
       prisma.checkRun.findFirst({ where: { type: "COLLECT", finishedAt: { not: null } }, orderBy: { startedAt: "desc" } }),
     ]);
 
-  // Per-site issue counts for the drill-down (down/degraded links + open incidents).
-  const siteIssues = await Promise.all(
-    sites.map(async (s) => {
-      const [down, degraded, incidents] = await Promise.all([
-        prisma.link.count({ where: { active: true, lastStatus: "down", exam: { siteId: s.id, status: { not: "stale" } } } }),
-        prisma.link.count({ where: { active: true, lastStatus: "degraded", exam: { siteId: s.id, status: { not: "stale" } } } }),
-        prisma.incident.count({ where: { status: "OPEN", exam: { siteId: s.id, status: { not: "stale" } } } }),
-      ]);
-      return { key: s.key, name: s.name, down, degraded, incidents, total: down + degraded + incidents };
+  // Per-site issue counts for the drill-down. Two grouped queries rather than
+  // three per site (an N+1 that grew with every site added).
+  const [linkRows, incidentRows] = await Promise.all([
+    prisma.link.findMany({
+      where: { ...ACTIVE_LINK, lastStatus: { in: ["down", "degraded"] } },
+      select: { lastStatus: true, exam: { select: { siteId: true } } },
     }),
-  );
+    prisma.incident.findMany({ where: OPEN_INCIDENT, select: { exam: { select: { siteId: true } } } }),
+  ]);
+  const tally = new Map<number, { down: number; degraded: number; incidents: number }>();
+  const bucket = (siteId: number) => {
+    let b = tally.get(siteId);
+    if (!b) tally.set(siteId, (b = { down: 0, degraded: 0, incidents: 0 }));
+    return b;
+  };
+  for (const l of linkRows) {
+    if (l.lastStatus === "down") bucket(l.exam.siteId).down++;
+    else bucket(l.exam.siteId).degraded++;
+  }
+  for (const i of incidentRows) if (i.exam) bucket(i.exam.siteId).incidents++;
+
+  const siteIssues = sites.map((s) => {
+    const b = tally.get(s.id) ?? { down: 0, degraded: 0, incidents: 0 };
+    return { key: s.key, name: s.name, ...b, total: b.down + b.degraded + b.incidents };
+  });
 
   const lastAudit = await prisma.checkRun.findFirst({
     where: { type: "AUDIT", finishedAt: { not: null } },
