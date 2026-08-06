@@ -22,12 +22,21 @@ export interface SweepSummary {
 export async function runUptimeSweep(onProgress?: ProgressFn): Promise<SweepSummary> {
   const run = await prisma.checkRun.create({ data: { type: "UPTIME" } });
 
-  // Housekeeping: incidents whose link was deactivated (e.g. replaced by a
-  // variant-keyed link) would otherwise stay OPEN forever — close them.
-  await prisma.incident.updateMany({
-    where: { status: "OPEN", link: { active: false } },
-    data: { status: "RESOLVED", resolvedAt: new Date() },
-  });
+  // Housekeeping — anything we no longer check must not keep reporting a frozen
+  // status, or the dashboard shows phantom failures that can never clear:
+  //  1. links belonging to a stale exam (the sweep skips those exams),
+  //  2. incidents whose link is deactivated or whose exam went stale.
+  // This also self-heals exams retired before markStale started doing it.
+  const [retiredLinks, closedIncidents] = await Promise.all([
+    prisma.link.updateMany({ where: { active: true, exam: { status: "stale" } }, data: { active: false } }),
+    prisma.incident.updateMany({
+      where: { status: "OPEN", OR: [{ link: { active: false } }, { exam: { status: "stale" } }] },
+      data: { status: "RESOLVED", resolvedAt: new Date() },
+    }),
+  ]);
+  if (retiredLinks.count || closedIncidents.count) {
+    logger.info({ retiredLinks: retiredLinks.count, closedIncidents: closedIncidents.count }, "housekeeping: retired stale-exam links/incidents");
+  }
 
   const links = await prisma.link.findMany({
     where: { active: true, exam: { status: { not: "stale" } } },

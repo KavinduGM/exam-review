@@ -179,9 +179,23 @@ function parseMarkers(value: unknown): string[] {
 
 /** Cross-check against the source DB: does the underlying data actually exist? */
 async function checkData(link: Link, exam: Exam): Promise<boolean | null> {
-  if (link.type === "PRACTICE" && exam.practiceDbExamId && link.setNo) {
-    const source = exam.practiceSource === "OLD" ? "OLD" : "NEW";
-    const n = await practiceQuestionCount(source, exam.practiceDbExamId, link.setNo);
+  if (link.type === "PRACTICE" && link.setNo) {
+    // Pick the source DB from THIS link's subdomain, not the exam's primary one:
+    // a dual-subdomain exam lives in both DBs under DIFFERENT ids, so validating
+    // an answers.* link against exam_db (or vice versa) produced false failures.
+    const source: "NEW" | "OLD" = link.variant
+      ? link.variant === "answers"
+        ? "OLD"
+        : "NEW"
+      : exam.practiceSource === "OLD"
+        ? "OLD"
+        : "NEW";
+    const dbExamId =
+      (source === "OLD" ? exam.practiceOldDbExamId : exam.practiceNewDbExamId) ??
+      // Fall back to the legacy single id only when it belongs to this source.
+      (exam.practiceSource === source ? exam.practiceDbExamId : null);
+    if (!dbExamId) return null; // unknown in this DB → not a failure, just unverifiable
+    const n = await practiceQuestionCount(source, dbExamId, link.setNo);
     if (n === null) return null;
     return n > 0;
   }

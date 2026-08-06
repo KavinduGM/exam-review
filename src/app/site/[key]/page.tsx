@@ -20,9 +20,9 @@ export default async function SitePage({
   if (!site) notFound();
 
   const [exams, links, incidents] = await Promise.all([
-    prisma.exam.findMany({ where: { siteId: site.id }, select: { id: true, examCode: true, examName: true, displayName: true, status: true } }),
-    prisma.link.findMany({ where: { active: true, exam: { siteId: site.id } }, select: { examId: true, lastStatus: true } }),
-    prisma.incident.findMany({ where: { status: "OPEN", exam: { siteId: site.id } }, select: { examId: true } }),
+    prisma.exam.findMany({ where: { siteId: site.id, status: { not: "stale" } }, select: { id: true, examCode: true, examName: true, displayName: true, status: true } }),
+    prisma.link.findMany({ where: { active: true, exam: { siteId: site.id, status: { not: "stale" } } }, select: { examId: true, lastStatus: true } }),
+    prisma.incident.findMany({ where: { status: "OPEN", exam: { siteId: site.id, status: { not: "stale" } } }, select: { examId: true } }),
   ]);
 
   const down = new Map<number, number>();

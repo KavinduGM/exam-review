@@ -6,17 +6,23 @@ import { SiteAdmin } from "./SiteAdmin";
 
 export const dynamic = "force-dynamic";
 
+// Only links/incidents belonging to a live (non-stale) exam count as real.
+const ACTIVE_LINK = { active: true, exam: { status: { not: "stale" } } } as const;
+const OPEN_INCIDENT = { status: "OPEN", exam: { status: { not: "stale" } } } as const;
+
 export default async function Dashboard() {
   const [siteCount, examCount, activeLinks, downLinks, degradedLinks, openIncidentCount, sites, lastRuns, lastCollect] =
     await Promise.all([
       prisma.site.count(),
-      prisma.exam.count(),
-      prisma.link.count({ where: { active: true } }),
-      prisma.link.count({ where: { active: true, lastStatus: "down" } }),
-      prisma.link.count({ where: { active: true, lastStatus: "degraded" } }),
-      prisma.incident.count({ where: { status: "OPEN" } }),
+      // Stale exams are no longer monitored, so they must not appear in any
+      // headline count — otherwise their frozen statuses read as live failures.
+      prisma.exam.count({ where: { status: { not: "stale" } } }),
+      prisma.link.count({ where: ACTIVE_LINK }),
+      prisma.link.count({ where: { ...ACTIVE_LINK, lastStatus: "down" } }),
+      prisma.link.count({ where: { ...ACTIVE_LINK, lastStatus: "degraded" } }),
+      prisma.incident.count({ where: OPEN_INCIDENT }),
       prisma.site.findMany({
-        include: { _count: { select: { exams: true } }, group: true },
+        include: { _count: { select: { exams: { where: { status: { not: "stale" } } } } }, group: true },
         orderBy: { key: "asc" },
       }),
       prisma.checkRun.findMany({ orderBy: { startedAt: "desc" }, take: 6 }),
@@ -27,9 +33,9 @@ export default async function Dashboard() {
   const siteIssues = await Promise.all(
     sites.map(async (s) => {
       const [down, degraded, incidents] = await Promise.all([
-        prisma.link.count({ where: { active: true, lastStatus: "down", exam: { siteId: s.id } } }),
-        prisma.link.count({ where: { active: true, lastStatus: "degraded", exam: { siteId: s.id } } }),
-        prisma.incident.count({ where: { status: "OPEN", exam: { siteId: s.id } } }),
+        prisma.link.count({ where: { active: true, lastStatus: "down", exam: { siteId: s.id, status: { not: "stale" } } } }),
+        prisma.link.count({ where: { active: true, lastStatus: "degraded", exam: { siteId: s.id, status: { not: "stale" } } } }),
+        prisma.incident.count({ where: { status: "OPEN", exam: { siteId: s.id, status: { not: "stale" } } } }),
       ]);
       return { key: s.key, name: s.name, down, degraded, incidents, total: down + degraded + incidents };
     }),

@@ -473,6 +473,8 @@ async function upsertExam(site: Site, ex: ExtractedExam, dbIndex: DbIndex): Prom
     partsCount,
     timedSetsCount,
     practiceDbExamId: practiceInfo?.dbExamId ?? null,
+    practiceNewDbExamId: practiceNew?.dbExamId ?? null,
+    practiceOldDbExamId: practiceOld?.dbExamId ?? null,
     timedDbExamId: timedInfo?.dbExamId ?? null,
     notes,
   });
@@ -550,6 +552,8 @@ interface ExamWrite {
   partsCount: number;
   timedSetsCount: number;
   practiceDbExamId: number | null;
+  practiceNewDbExamId?: number | null;
+  practiceOldDbExamId?: number | null;
   timedDbExamId: number | null;
   notes: string[];
 }
@@ -570,6 +574,8 @@ async function writeExam(w: ExamWrite) {
     partsCount: w.partsCount,
     timedSetsCount: w.timedSetsCount,
     practiceDbExamId: w.practiceDbExamId,
+    practiceNewDbExamId: w.practiceNewDbExamId ?? null,
+    practiceOldDbExamId: w.practiceOldDbExamId ?? null,
     timedDbExamId: w.timedDbExamId,
     notes: w.notes.length ? w.notes.join("; ") : null,
     status: "active",
@@ -643,10 +649,32 @@ async function syncLinksList(examId: number, generated: GeneratedLink[]): Promis
   return generated.length;
 }
 
+/**
+ * Retire exams that this collection run didn't see.
+ *
+ * Marking the exam stale is not enough: the uptime sweep skips stale exams, so
+ * their links would keep an active flag and a FROZEN lastStatus forever while
+ * still being counted on the dashboard — phantom down/degraded numbers that can
+ * never clear. Deactivate the links and resolve their incidents too, so a stale
+ * exam disappears from every "active" count in one place. Re-collecting the exam
+ * reactivates its links (syncLinks upserts active: true).
+ */
 async function markStale(site: Site, seenIds: number[]): Promise<void> {
-  if (seenIds.length > 0) {
-    await prisma.exam.updateMany({ where: { siteId: site.id, id: { notIn: seenIds } }, data: { status: "stale" } });
-  }
+  if (seenIds.length === 0) return;
+  const stale = await prisma.exam.findMany({
+    where: { siteId: site.id, id: { notIn: seenIds } },
+    select: { id: true },
+  });
+  if (stale.length === 0) return;
+  const staleIds = stale.map((e) => e.id);
+
+  await prisma.exam.updateMany({ where: { id: { in: staleIds } }, data: { status: "stale" } });
+  await prisma.link.updateMany({ where: { examId: { in: staleIds }, active: true }, data: { active: false } });
+  await prisma.incident.updateMany({
+    where: { examId: { in: staleIds }, status: "OPEN" },
+    data: { status: "RESOLVED", resolvedAt: new Date() },
+  });
+  logger.info({ site: site.key, staleExams: staleIds.length }, "retired exams not seen this run");
 }
 
 export interface PurgeResult {

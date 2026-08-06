@@ -121,7 +121,11 @@ model Exam {
   timedSetsCount Int @default(5)
 
   // Source-DB cross-validation snapshot.
-  practiceDbExamId Int?
+  practiceDbExamId Int? // primary (questions./NEW when present, else answers./OLD)
+  // Per-subdomain ids: an exam can exist in BOTH source DBs with DIFFERENT ids,
+  // so the data-integrity check must look up the one matching the link variant.
+  practiceNewDbExamId Int? // exam_db    (questions.*)
+  practiceOldDbExamId Int? // answers_db (answers.*)
   timedDbExamId    Int?
   notes            String? // mismatches, anomalies surfaced during collection
 
