@@ -70,6 +70,33 @@ test("'Uncaught TypeError' inside a <script> bundle is ignored", () => {
   );
 });
 
+test("a security exam explaining DoS ('service unavailable') stays ok", () => {
+  // Regression: D488 Set 2/3 — 20 rendered questions, but an answer explaining
+  // denial-of-service contained "service unavailable", a 503 marker, and the
+  // whole page was reported DOWN.
+  const questions = Array.from({ length: 20 }, (_, i) => `<h2>Question ${i + 1}: …</h2><button>Show Answer</button>`).join("");
+  const html = body(questions + "<p>a denial of service attack aims to render a service unavailable by flooding it with traffic</p>");
+  assert.equal(checkContentVerdict("PRACTICE", html, null), "ok");
+});
+
+test("rendered content beats every error-word in the question text", () => {
+  const questions = Array.from({ length: 5 }, (_, i) => `<h2>Question ${i + 1}: …</h2><button>Show Answer</button>`).join("");
+  for (const phrase of ["fatal error", "sqlstate", "mysqli", "database connection", "uncaught exception", "500 internal server error"]) {
+    assert.equal(checkContentVerdict("PRACTICE", body(questions + `<p>the exam covers ${phrase} handling</p>`), null), "ok", phrase);
+  }
+});
+
+test("error markers still decide when nothing rendered", () => {
+  // No question blocks => the vocabulary is the only signal, and it counts.
+  assert.equal(checkContentVerdict("PRACTICE", body("<p>503 service unavailable</p>"), null), "broken");
+  assert.equal(checkContentVerdict("PRACTICE", body("<p>fatal error: mysqli connection refused</p>"), null), "broken");
+});
+
+test("a single stray 'Question 1' is not proof of content", () => {
+  // Count-based: one template mention must not rescue an error page.
+  assert.equal(checkContentVerdict("PRACTICE", "<html><body><h2>Question 1:</h2><p>Could not load this exam.</p></body></html>", null), "broken");
+});
+
 test("a substantial page missing its markers is degraded, not down", () => {
   assert.equal(checkContentVerdict("PRACTICE", body("<h1>Welcome</h1>"), null), "degraded");
 });

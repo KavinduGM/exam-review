@@ -51,10 +51,19 @@ function stripNonVisible(html: string): string {
     .replace(/<!--[\s\S]*?-->/g, " ");
 }
 
-/** Strong evidence real content rendered (used to override soft empty markers). */
+/**
+ * Strong evidence that real content rendered.
+ *
+ * Deliberately count-based: one stray "Question 1" in a template proves nothing,
+ * but a page carrying several question blocks (or answer toggles) is a working
+ * page. This is what lets us trust content over vocabulary — see the note on
+ * error markers in checkContentVerdict.
+ */
 function hasStrongPositive(type: string, visibleLower: string): boolean {
-  if (type === "PRACTICE") return /question\s*\d/.test(visibleLower) || visibleLower.includes("show answer");
-  if (type === "TIMED") return /question\s*\d/.test(visibleLower) || visibleLower.includes("start") || visibleLower.includes("submit");
+  const questionBlocks = (visibleLower.match(/question\s*\d+\s*[:.)]/g) ?? []).length;
+  const answerToggles = (visibleLower.match(/show answer/g) ?? []).length;
+
+  if (type === "PRACTICE" || type === "TIMED") return questionBlocks >= 2 || answerToggles >= 1;
   const hints = POSITIVE_HINTS[type] ?? [];
   return hints.some((h) => visibleLower.includes(h));
 }
@@ -141,15 +150,25 @@ export function checkContentVerdict(type: string, html: string, expectedMarkers:
   const visible = stripNonVisible(html).toLowerCase();
   const text = visible.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 
-  // Hard server/PHP/DB error text => the page is broken, not just degraded.
-  if (HARD_ERROR_MARKERS.some((m) => visible.includes(m))) return "broken";
+  // CONTENT BEATS VOCABULARY. These are exam-prep sites: an IT/security paper
+  // legitimately discusses "service unavailable" (denial-of-service), "uncaught"
+  // exceptions, SQL errors and the like. Scanning such a page for error words
+  // flagged perfectly good pages as broken. So once we can see real content
+  // rendered — several question blocks or answer toggles — the page works, no
+  // matter what words the questions contain. Error markers only decide the
+  // verdict when there is nothing rendered to look at.
+  const strong = hasStrongPositive(type, visible);
 
-  // Empty-state text with nothing actually rendered => broken (nothing to use).
-  if (SOFT_EMPTY_MARKERS.some((m) => visible.includes(m)) && !hasStrongPositive(type, visible)) return "broken";
+  if (!strong) {
+    // Hard server/PHP/DB error text => the page is broken, not just degraded.
+    if (HARD_ERROR_MARKERS.some((m) => visible.includes(m))) return "broken";
 
-  // A near-empty body with no real content is a broken page (e.g. a 76-byte
-  // error stub returned with HTTP 200).
-  if (text.length < MIN_REAL_PAGE_CHARS && !hasStrongPositive(type, visible)) return "broken";
+    // Empty-state text with nothing actually rendered => broken (nothing to use).
+    if (SOFT_EMPTY_MARKERS.some((m) => visible.includes(m))) return "broken";
+
+    // A near-empty body is a broken page (e.g. a 76-byte error stub with HTTP 200).
+    if (text.length < MIN_REAL_PAGE_CHARS) return "broken";
+  }
 
   // Custom markers configured on the link take precedence.
   const markers = parseMarkers(expectedMarkers);
