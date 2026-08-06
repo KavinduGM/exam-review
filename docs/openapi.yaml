@@ -171,7 +171,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ResolveResult" }
         "404":
-          description: No exam matched the code in that channel.
+          description: No exam matched the code in that channel, or the exam has been retired.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ResolveResult" }

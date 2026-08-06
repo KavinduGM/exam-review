@@ -403,6 +403,31 @@ For each (channel, examCode) the automation processes:
 | `DESCRIPTION_WEBHOOK_KEY` | Sent as `x-api-key` on the recovery webhook. |
 | `REPORT_ESCALATION_HOURS` | Hours before a still-down report emails the admin (default 24). |
 
+### Recent behaviour changes (no contract change)
+
+No endpoint, field or auth has changed — existing integrations keep working
+without edits. Three behaviours did change, and they affect what you receive:
+
+1. **Retired exams now return `404` instead of stale data.** When an exam
+   disappears from a site, it is retired: its links stop being verified. Those
+   exams used to still resolve, which meant a description could be built from
+   URLs nobody was checking any more. `/api/description`, `/api/exams`,
+   `/api/exam` and `/api/qr` now treat them as not found. Handle `404` as
+   "don't publish; flag for review" — the exam may have been removed from the
+   site.
+2. **`status` / `allUp` are stricter and more accurate.** A page that returns
+   HTTP 200 but is actually an error page ("Could not load this exam", a
+   database error, an empty shell) is now reported `down` rather than
+   `degraded`. Separately, a bug that mis-validated second-subdomain practice
+   links against the wrong source database was fixed, so links that were
+   wrongly `degraded` now report `up`. If your logic treats `degraded` as
+   publishable and `down` as not, expect more links to land in `down` — those
+   are genuinely broken pages you previously would have published.
+3. **`examName` now reflects manual corrections everywhere**, including the
+   `link.recovered` webhook. Same field, better value: an operator can strip a
+   vendor prefix (e.g. *"Elsevier (HESI): HESI Admission Assessment - HESI A2"*
+   → *"HESI A2"*) and you receive the curated name.
+
 ### Conventions
 
 - **Exam code is the key**: `D310`, `C720`, `TEAS`, `NYPCL`. Multi-part course
