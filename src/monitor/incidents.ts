@@ -18,7 +18,7 @@ export async function reconcileIncident(
   exam: Exam & { site: { name: string } },
   outcome: CheckOutcome,
 ): Promise<IncidentTransition> {
-  const severity = outcome.ok ? null : outcome.contentOk === false || outcome.dataOk === false ? "degraded" : "down";
+  const severity = outcome.ok ? null : outcome.status; // authoritative severity from checkLink
   const open = await prisma.incident.findFirst({
     where: { linkId: link.id, status: "OPEN" },
     orderBy: { openedAt: "desc" },

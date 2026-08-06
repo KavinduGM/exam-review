@@ -45,7 +45,7 @@ export async function runUptimeSweep(onProgress?: ProgressFn): Promise<SweepSumm
   await mapLimit(links, env.tuning.httpConcurrency, async (link) => {
     const outcome = await checkLink(link, link.exam);
 
-    const status = outcome.ok ? "up" : outcome.contentOk === false || outcome.dataOk === false ? "degraded" : "down";
+    const status = outcome.status; // authoritative severity from checkLink
     if (status === "down") down++;
     if (status === "degraded") degraded++;
 

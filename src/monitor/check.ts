@@ -59,10 +59,13 @@ function hasStrongPositive(type: string, visibleLower: string): boolean {
   return hints.some((h) => visibleLower.includes(h));
 }
 
+export type LinkStatus = "up" | "degraded" | "down";
+
 export interface CheckOutcome {
   httpStatus: number;
   latencyMs: number;
   ok: boolean; // overall health
+  status: LinkStatus; // authoritative severity — callers must use this, not re-derive it
   contentOk: boolean | null;
   dataOk: boolean | null;
   error?: string;
@@ -83,51 +86,87 @@ export async function checkLink(link: Link, exam: Exam, opts: { keepBody?: boole
       httpStatus: res.status,
       latencyMs: res.latencyMs,
       ok: false,
+      status: rateLimited ? "degraded" : "down",
       contentOk: rateLimited ? false : null,
       dataOk: null,
       error: rateLimited ? "HTTP 429 (rate limited — monitor throttled, page likely fine for users)" : (res.error ?? `HTTP ${res.status}`),
     };
   }
 
-  const contentOk = checkContent(link.type, res.body, link.expectedMarkers);
+  const verdict = checkContentVerdict(link.type, res.body, link.expectedMarkers);
+  const contentOk = verdict === null ? null : verdict === "ok";
   const dataOk = await checkData(link, exam);
-
-  // dataOk === false is a hard failure (page up but data missing). contentOk
-  // === false is treated as degraded, not fully down.
   const ok = dataOk !== false && contentOk !== false;
+
+  // A page that returns 200 but is an outright failure ("Could not load this
+  // exam", a PHP/DB error, an empty shell) is USELESS to a visitor — that is
+  // DOWN, not merely degraded. Missing markers on an otherwise real page, or a
+  // data-integrity mismatch, stay degraded.
+  const status: LinkStatus = ok ? "up" : verdict === "broken" ? "down" : "degraded";
 
   return {
     httpStatus: res.status,
     latencyMs: res.latencyMs,
     ok,
+    status,
     contentOk,
     dataOk,
-    error: ok ? undefined : contentOk === false ? "content markers missing/error text present" : "data-integrity mismatch",
+    error: ok
+      ? undefined
+      : verdict === "broken"
+        ? "page loads but is broken (error page / no content)"
+        : contentOk === false
+          ? "content markers missing"
+          : "data-integrity mismatch",
     body: opts.keepBody ? res.body : undefined,
   };
 }
 
-/** Exported for tests. Judges page content from raw HTML. */
-export function checkContent(type: string, html: string, expectedMarkers: unknown): boolean | null {
+export type ContentVerdict = "ok" | "degraded" | "broken";
+
+/** Minimum visible characters before a page can be considered "a real page". */
+const MIN_REAL_PAGE_CHARS = 300;
+
+/**
+ * Judge page content from raw HTML.
+ *   "broken"   — 200 but useless: server/DB error text, an explicit "could not
+ *                load" message, an empty-state with nothing rendered, or a
+ *                near-empty body. Callers treat this as DOWN.
+ *   "degraded" — a real page, but the expected markers aren't there.
+ *   "ok"       — looks healthy.
+ * Exported for tests.
+ */
+export function checkContentVerdict(type: string, html: string, expectedMarkers: unknown): ContentVerdict | null {
   if (!html) return null;
   const visible = stripNonVisible(html).toLowerCase();
+  const text = visible.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 
-  // Hard server/PHP/DB error text => unhealthy, full stop.
-  if (HARD_ERROR_MARKERS.some((m) => visible.includes(m))) return false;
+  // Hard server/PHP/DB error text => the page is broken, not just degraded.
+  if (HARD_ERROR_MARKERS.some((m) => visible.includes(m))) return "broken";
 
-  // Soft empty-state text => unhealthy only when no real content rendered.
-  if (SOFT_EMPTY_MARKERS.some((m) => visible.includes(m)) && !hasStrongPositive(type, visible)) return false;
+  // Empty-state text with nothing actually rendered => broken (nothing to use).
+  if (SOFT_EMPTY_MARKERS.some((m) => visible.includes(m)) && !hasStrongPositive(type, visible)) return "broken";
+
+  // A near-empty body with no real content is a broken page (e.g. a 76-byte
+  // error stub returned with HTTP 200).
+  if (text.length < MIN_REAL_PAGE_CHARS && !hasStrongPositive(type, visible)) return "broken";
 
   // Custom markers configured on the link take precedence.
   const markers = parseMarkers(expectedMarkers);
   if (markers.length > 0) {
-    return markers.every((m) => visible.includes(m.toLowerCase()));
+    return markers.every((m) => visible.includes(m.toLowerCase())) ? "ok" : "degraded";
   }
 
   // Otherwise require at least one type-specific positive hint.
   const hints = POSITIVE_HINTS[type] ?? [];
-  if (hints.length === 0) return true;
-  return hints.some((h) => visible.includes(h));
+  if (hints.length === 0) return "ok";
+  return hints.some((h) => visible.includes(h)) ? "ok" : "degraded";
+}
+
+/** Boolean view of the verdict (true = healthy). Kept for tests/back-compat. */
+export function checkContent(type: string, html: string, expectedMarkers: unknown): boolean | null {
+  const v = checkContentVerdict(type, html, expectedMarkers);
+  return v === null ? null : v === "ok";
 }
 
 function parseMarkers(value: unknown): string[] {

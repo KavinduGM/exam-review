@@ -61,12 +61,32 @@ export function ExamUrlsEditor({ examId, initial }: { examId: number; initial: E
     router.refresh();
   }
 
+  async function recheck() {
+    setSaving(true);
+    setError("");
+    setMsg("Re-checking every link for this exam…");
+    const res = await fetch(`/api/admin/recheck/${examId}`, { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    setSaving(false);
+    if (!res.ok) {
+      setError(data.error ?? `Re-check failed (${res.status})`);
+      setMsg("");
+      return;
+    }
+    setMsg(`Re-checked ${data.checked} link(s): ${data.up} up · ${data.degraded} degraded · ${data.down} down.`);
+    router.refresh();
+  }
+
   if (!editing) {
     return (
       <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <button className="secondary" onClick={() => setEditing(true)}>✎ Fix URLs</button>
+        <button className="secondary" onClick={recheck} disabled={saving} title="Check this exam's links right now instead of waiting for the daily sweep">
+          {saving ? "Checking…" : "↻ Re-check now"}
+        </button>
         {anyOverride && <span className="badge unknown">URLs edited</span>}
         {msg && <span className="muted" style={{ fontSize: "0.85em" }}>{msg}</span>}
+        {error && <span className="badge down">{error}</span>}
       </div>
     );
   }

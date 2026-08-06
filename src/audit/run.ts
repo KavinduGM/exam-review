@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
 import { mapLimit } from "@/lib/http";
-import { checkLink } from "@/monitor/check";
+import { checkLink, type CheckOutcome } from "@/monitor/check";
 import { reconcileIncident } from "@/monitor/incidents";
 import { capture, closeBrowser } from "./screenshot";
 import { reviewScreenshot } from "./review";
@@ -57,10 +57,13 @@ export async function runWeeklyAudit(onProgress?: ProgressFn): Promise<AuditSumm
 
     // Fold a broken image into the outcome as "degraded" (page loads, banner lost).
     // Keep only slim fields — never retain the page body in the tier1 array.
-    const outcome = {
+    const outcome: CheckOutcome = {
       httpStatus: raw.httpStatus,
       latencyMs: raw.latencyMs,
       ok: raw.ok && !imgErr,
+      // A broken banner image degrades an otherwise-healthy page; it never turns
+      // a working page into "down", and it never upgrades a broken one.
+      status: imgErr && raw.status === "up" ? "degraded" : raw.status,
       contentOk: imgErr ? false : raw.contentOk,
       dataOk: raw.dataOk,
       error: raw.error ?? imgErr,
@@ -78,7 +81,7 @@ export async function runWeeklyAudit(onProgress?: ProgressFn): Promise<AuditSumm
         error: outcome.error,
       },
     });
-    const status = outcome.ok ? "up" : outcome.contentOk === false || outcome.dataOk === false ? "degraded" : "down";
+    const status = outcome.status; // authoritative severity
     await prisma.link.update({ where: { id: link.id }, data: { lastStatus: status, lastCheckAt: new Date() } });
     await reconcileIncident(link, link.exam, outcome);
     t1done++;

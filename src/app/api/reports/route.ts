@@ -48,7 +48,7 @@ export async function POST(req: Request) {
 
   if (link) {
     const outcome = await checkLink(link, link.exam);
-    status = outcome.ok ? "up" : outcome.contentOk === false || outcome.dataOk === false ? "degraded" : "down";
+    status = outcome.status;
     httpStatus = outcome.httpStatus;
     error = outcome.error;
     await prisma.link.update({ where: { id: link.id }, data: { lastStatus: status, lastCheckAt: new Date() } });
