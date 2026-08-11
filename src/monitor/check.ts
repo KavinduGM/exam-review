@@ -176,6 +176,15 @@ export function checkContentVerdict(type: string, html: string, expectedMarkers:
     return markers.every((m) => visible.includes(m.toLowerCase())) ? "ok" : "degraded";
   }
 
+  // A practice page MUST show questions. The generic hints below ("question",
+  // "option", "answer") are substrings that inlined CSS class names like
+  // `.answer-option` satisfy, so an empty 5KB shell with no questions at all was
+  // passing as healthy. Practice pages are server-rendered, so absent question
+  // blocks means absent content.
+  // NOTE: deliberately PRACTICE-only — timed pages are JS-driven exam apps that
+  // legitimately ship no question markup in their HTML.
+  if (type === "PRACTICE") return strong ? "ok" : "degraded";
+
   // Otherwise require at least one type-specific positive hint.
   const hints = POSITIVE_HINTS[type] ?? [];
   if (hints.length === 0) return "ok";

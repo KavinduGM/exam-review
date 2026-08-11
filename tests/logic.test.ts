@@ -97,6 +97,25 @@ test("a single stray 'Question 1' is not proof of content", () => {
   assert.equal(checkContentVerdict("PRACTICE", "<html><body><h2>Question 1:</h2><p>Could not load this exam.</p></body></html>", null), "broken");
 });
 
+test("an empty practice shell is NOT ok just because CSS says 'answer-option'", () => {
+  // Regression: answers.oapractice.com returns 200 + ~5KB of layout/CSS for
+  // exams that only exist on questions.*. The words "answer"/"option" appear in
+  // class names, which satisfied the old substring hints — so a page with zero
+  // questions passed as healthy, and the collector built 15 bogus links from it.
+  const shell = `<html><body><h1>D322 - Introduction to IT</h1>
+    <p>.answer-option[data-astro-cid-r364hnea].correct label { color: green }</p>
+    ${"<p>" + "x".repeat(600) + "</p>"}</body></html>`;
+  assert.notEqual(checkContentVerdict("PRACTICE", shell, null), "ok");
+});
+
+test("timed pages are NOT held to the practice content rule", () => {
+  // Timed exams are JS-driven apps: their HTML ships no question markup, so the
+  // strict practice rule would wrongly flag all of them.
+  const timedApp = `<html><body><h1>Exam</h1><div id="app"></div>
+    <p>Start the exam and submit your answers.</p>${"<p>" + "y".repeat(600) + "</p>"}</body></html>`;
+  assert.equal(checkContentVerdict("TIMED", timedApp, null), "ok");
+});
+
 test("a substantial page missing its markers is degraded, not down", () => {
   assert.equal(checkContentVerdict("PRACTICE", body("<h1>Welcome</h1>"), null), "degraded");
 });

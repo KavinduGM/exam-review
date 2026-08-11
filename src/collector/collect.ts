@@ -9,6 +9,7 @@ import { enumerateLinks, type GeneratedLink, type PracticeBase, type EnumerateIn
 import { constructPracticeUrl, constructTimedUrl, timedSetUrl, normalizeUrl, hostOf } from "./construct";
 import { loadTimedIndex, loadPracticeIndex, type TimedIndexEntry, type PracticeIndexEntry } from "@/sources";
 import { ensureGroups } from "@/lib/groups";
+import { checkContentVerdict } from "@/monitor/check";
 import { effectiveLanding, effectivePractice, effectiveTimed, effectiveContact } from "@/lib/examUrls";
 import type { ProgressFn } from "@/lib/progress";
 
@@ -112,12 +113,21 @@ async function buildDbIndex(): Promise<DbIndex> {
   return { connected, timedAll, timedByBackLink, timedBySlug, timedByCode, practiceAll, practiceByCode, practiceNewByCode, practiceOldByCode, nameByLanding, nameByCode };
 }
 
-/** Confirm a constructed practice URL actually serves the exam (guards the 2nd
- *  subdomain so sites without an answers. host don't get false failures). */
+/**
+ * Confirm a constructed practice URL actually SERVES THE EXAM before we create
+ * links for it (guards the 2nd subdomain).
+ *
+ * This used to be its own weak heuristic — "200, >500 bytes, and no 404 wording"
+ * — which an empty shell page passes: answers.oapractice.com returns HTTP 200
+ * and ~5KB of layout+CSS for exams that only live on questions.*, so D322/D662
+ * got 15 bogus answers.* links that then reported as down. Defer to the same
+ * content judgement the monitor uses: only a page that really renders questions
+ * counts as working.
+ */
 async function practiceUrlWorks(url: string): Promise<boolean> {
   const res = await fetchUrl(url);
-  if (!res.ok || res.body.length < 500) return false;
-  return !/(page not found|404 not found|no questions (found|available))/i.test(res.body.slice(0, 4000));
+  if (!res.ok || !res.body) return false;
+  return checkContentVerdict("PRACTICE", res.body, null) === "ok";
 }
 
 export interface CollectSiteResult {
