@@ -68,7 +68,93 @@ export default function QrExportPage() {
           <ChannelCard key={c.key} channel={c.key} label={c.label} fsSupported={fsSupported} />
         ))}
       </div>
+
+      <PasteLinks />
     </main>
+  );
+}
+
+/**
+ * Ad-hoc generator: paste any links, get a ZIP of their QR codes. Use it for a
+ * handful of exams you just published, without re-exporting a whole channel.
+ */
+function PasteLinks() {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+
+  // One per line. Optional "Name | https://…" (or "Name, https://…") to control
+  // the filename; otherwise it's derived from the ?ec= code or the last path bit.
+  const items = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const m = line.match(/^(.*?)\s*[|,]\s*(https?:\/\/\S+)$/i);
+      if (m) return { name: m[1].trim() || undefined, url: m[2] };
+      const url = line.match(/https?:\/\/\S+/i)?.[0];
+      return url ? { url } : null;
+    })
+    .filter((x): x is { url: string; name?: string } => x !== null);
+
+  async function generate() {
+    setBusy(true);
+    setError("");
+    setMsg(`Generating ${items.length} QR code(s)…`);
+    try {
+      const res = await fetch("/api/admin/qr-batch", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ items, size: QR_SIZE, format: "png" }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `QR_codes_${items.length}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMsg(`Downloaded ${items.length} QR code(s).`);
+    } catch (e) {
+      setMsg("");
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="panel" style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 10 }}>
+      <strong>Generate from links</strong>
+      <p className="muted" style={{ margin: 0, fontSize: "0.88em", maxWidth: "78ch" }}>
+        Paste one link per line and download their QR codes as a ZIP — handy for a few exams you just
+        published, without re-exporting the whole channel. To choose the filename, write{" "}
+        <code>Name | https://…</code>; otherwise it&apos;s taken from the exam code in the link.
+      </p>
+      <textarea
+        rows={6}
+        value={text}
+        disabled={busy}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={"https://oapractice.com/d310\nQR_D311_oaP | https://oapractice.com/d311"}
+        style={{ width: "100%", fontFamily: "ui-monospace, monospace", fontSize: "12.5px" }}
+      />
+      <div className="row" style={{ gap: 8 }}>
+        <button onClick={generate} disabled={busy || items.length === 0}>
+          {busy ? "Generating…" : `Generate ${items.length || ""} QR${items.length === 1 ? "" : "s"} → ZIP`}
+        </button>
+        <button className="secondary" onClick={() => { setText(""); setMsg(""); setError(""); }} disabled={busy}>
+          Clear
+        </button>
+        {msg && <span className="muted" style={{ fontSize: "0.85em" }}>{msg}</span>}
+        {error && <span className="badge down">{error}</span>}
+      </div>
+    </section>
   );
 }
 
@@ -80,6 +166,8 @@ function ChannelCard({ channel, label, fsSupported }: { channel: Channel; label:
   const [msg, setMsg] = useState<string>("");
   const [preview, setPreview] = useState<Landing[] | null>(null);
   const [onlyHealthy, setOnlyHealthy] = useState(true);
+  const [onlyNew, setOnlyNew] = useState(false);
+  const [newDays, setNewDays] = useState(7);
 
   async function chooseFolder() {
     try {
@@ -94,7 +182,10 @@ function ChannelCard({ channel, label, fsSupported }: { channel: Channel; label:
   }
 
   async function fetchLandings(): Promise<LandingsResp> {
-    const q = onlyHealthy ? "?status=up" : "";
+    const params = new URLSearchParams();
+    if (onlyHealthy) params.set("status", "up");
+    if (onlyNew) params.set("days", String(newDays));
+    const q = params.toString() ? `?${params}` : "";
     const res = await fetch(`/api/landings/${channel}${q}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`landings ${res.status}`);
     return res.json();
@@ -188,6 +279,21 @@ function ChannelCard({ channel, label, fsSupported }: { channel: Channel; label:
       <label className="row" style={{ gap: 6, alignItems: "center", fontSize: "0.85em" }}>
         <input type="checkbox" checked={onlyHealthy} onChange={(e) => setOnlyHealthy(e.target.checked)} disabled={busy} />
         Only exams with a healthy landing page
+      </label>
+
+      <label className="row" style={{ gap: 6, alignItems: "center", fontSize: "0.85em" }}>
+        <input type="checkbox" checked={onlyNew} onChange={(e) => setOnlyNew(e.target.checked)} disabled={busy} />
+        Only exams added in the last
+        <input
+          type="number"
+          min={1}
+          max={365}
+          value={newDays}
+          disabled={busy || !onlyNew}
+          onChange={(e) => setNewDays(Math.max(1, Number(e.target.value) || 7))}
+          style={{ width: 64 }}
+        />
+        days
       </label>
 
       <div className="row" style={{ gap: 8 }}>

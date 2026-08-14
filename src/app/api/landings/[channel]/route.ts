@@ -11,6 +11,8 @@ export const dynamic = "force-dynamic";
 // Every active exam for a channel (OAP/OAG/NURSING/STATE) with its landing URL
 // and a ready-to-use QR URL — the source list for a QR-generator UI. Public.
 //   ?status=up|degraded|down   filter by the landing link's last status
+//   ?days=N                    only exams first collected in the last N days
+//                              (how you fetch just the exams you added recently)
 export async function GET(req: Request, ctx: { params: Promise<{ channel: string }> }) {
   const { channel } = await ctx.params;
   const site = CHANNEL_TO_SITE[channel.toUpperCase()];
@@ -20,11 +22,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ channel: string
 
   const url = new URL(req.url);
   const statusFilter = url.searchParams.get("status")?.toLowerCase();
+  const days = Number(url.searchParams.get("days"));
+  const since = Number.isFinite(days) && days > 0 ? new Date(Date.now() - days * 86_400_000) : null;
   // Absolute base for the qrUrl so the list is usable as-is by an external app.
   const base = env.publicApiBase || url.origin;
 
   const exams = await prisma.exam.findMany({
-    where: { site: { key: site }, status: { not: "stale" } },
+    where: { site: { key: site }, status: { not: "stale" }, ...(since ? { createdAt: { gte: since } } : {}) },
     select: {
       examCode: true,
       examName: true,
@@ -32,6 +36,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ channel: string
       nameResolved: true,
       landingUrl: true,
       landingUrlOverride: true,
+      createdAt: true,
       links: { where: { type: "LANDING", active: true }, select: { lastStatus: true }, take: 1 },
     },
     orderBy: { examCode: "asc" },
@@ -45,10 +50,17 @@ export async function GET(req: Request, ctx: { params: Promise<{ channel: string
       nameResolved: e.nameResolved,
       landingUrl: effectiveLanding(e),
       landingStatus: e.links[0]?.lastStatus ?? null,
+      addedAt: e.createdAt,
       qrUrl: `${base}/api/qr/${site}/${encodeURIComponent(e.examCode)}`, // append ?format=svg / ?download=1
       qrFilename: `${qrFilenameBase(channel.toUpperCase(), e.examCode, effectiveName(e))}.png`,
     }))
     .filter((r) => (statusFilter ? r.landingStatus === statusFilter : true));
 
-  return NextResponse.json({ channel: channel.toUpperCase(), site, count: rows.length, exams: rows });
+  return NextResponse.json({
+    channel: channel.toUpperCase(),
+    site,
+    count: rows.length,
+    ...(since ? { onlyAddedSince: since.toISOString() } : {}),
+    exams: rows,
+  });
 }

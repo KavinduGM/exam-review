@@ -287,12 +287,19 @@ curl "https://monitor.groovymark.com/api/landings/OAP"
 }
 ```
 
-- `?status=up` filters to exams whose landing is currently healthy — handy so you
+- `?days=N` returns only exams first collected in the last N days — the simple way
+to fetch just the exams you added recently. `?status=up` filters to exams whose
+landing is currently healthy — handy so you
   never print a QR that points at a down page. Append `?format=svg` / `?download=1`
   to any `qrUrl`.
 - `qrFilename` is the agreed save name for that exam's QR: OAP/OAG use the code
   (`QR_D310_oaP.png`), Nursing/State use the exam name
   (`QR_HESI_Fundamentals_of_Nursing_Nursing.png`).
+
+**Regenerating is safe.** A QR encodes the URL itself, not a token, so
+regenerating an exam's QR produces a byte-identical image and every QR already
+printed or shared keeps working. A QR only stops matching if the exam's landing
+URL itself changes.
 
 **Built-in export page.** The dashboard also has a **QR codes** page (`/qr`,
 behind login) that does all this for you: pick a destination folder per channel
